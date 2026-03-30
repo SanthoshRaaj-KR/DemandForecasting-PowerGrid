@@ -8,8 +8,21 @@ from typing import Any, Dict, List
 
 import requests
 from bs4 import BeautifulSoup
+from urllib3.util.ssl_ import create_urllib3_context
 
 from .setup import NEWS_ARTICLE_LIMIT, RSS_FEEDS, RSS_ITEM_LIMIT
+
+# ── SSL FIX: Support for legacy government servers ───────────────────────────
+class LegacyRenegotiationAdapter(requests.adapters.HTTPAdapter):
+    """
+    Adapter that allows 'unsafe legacy renegotiation' on older SSL/TLS servers.
+    Commonly needed for certain Indian Government (.in) domains.
+    """
+    def init_poolmanager(self, *args, **kwargs):
+        context = create_urllib3_context()
+        context.options |= 0x4  # ssl.OP_LEGACY_SERVER_CONNECT
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
 
 WEATHER_CODE_LABELS = {
     0: "clear sky",
@@ -55,6 +68,15 @@ class DataFetcher:
         self._log          = log_fn or (lambda tag, data: None)
         self._session      = requests.Session()
         self._session.headers.update({"User-Agent": "Mozilla/5.0 (GridBot/3.0)"})
+        
+        # Mount legacy adapter for grid domains that use older SSL
+        legacy_adapter = LegacyRenegotiationAdapter()
+        self._session.mount("https://nrldc.in", legacy_adapter)
+        self._session.mount("https://wrldc.in", legacy_adapter)
+        self._session.mount("https://srldc.in", legacy_adapter)
+        self._session.mount("https://erldc.in", legacy_adapter)
+        self._session.mount("https://posoco.in", legacy_adapter)
+        self._session.mount("https://grid-india.in", legacy_adapter)
 
     #  Weather 
     def fetch_owm_forecast(self, city: str, lat: float, lon: float) -> Dict[str, Any]:
@@ -159,11 +181,42 @@ class DataFetcher:
                 "source": "open-meteo",
                 "city": city,
                 "hourly_forecast_7d": records,
+                "daily_forecast_7d": self._calculate_daily_from_hourly(records),
             }
             self._log(f"OpenMeteo_7D_Hourly_{city}", json.dumps(result, indent=2))
             return result
         except Exception as exc:
-            return {"error": str(exc), "hourly_forecast_7d": []}
+            return {"error": str(exc), "hourly_forecast_7d": [], "daily_forecast_7d": []}
+
+    def _calculate_daily_from_hourly(self, hourly: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Averages and aggregates hourly data into 7 daily summaries."""
+        daily: Dict[str, Dict] = {}
+        for h in hourly:
+            day = h["time"][:10]
+            if day not in daily:
+                daily[day] = {"temps": [], "humidity": [], "conditions": [], "rain": []}
+            daily[day]["temps"].append(h["temperature_c"])
+            daily[day]["humidity"].append(h.get("humidity_pct", 50))
+            daily[day]["conditions"].append(h["condition"])
+            daily[day]["rain"].append(h.get("precip_mm", 0.0))
+
+        summaries = []
+        for day, v in sorted(daily.items()):
+            max_t = max(v["temps"])
+            avg_h = round(sum(v["humidity"]) / len(v["humidity"]))
+            # Heat index approx
+            hi = round(max_t + 0.33 * (avg_h / 100 * 6.105 * (17.27 * max_t / (237.3 + max_t))) - 4.0, 1)
+
+            summaries.append({
+                "date"              : day,
+                "max_c"             : round(max_t, 1),
+                "min_c"             : round(min(v["temps"]), 1),
+                "avg_humidity_pct"  : avg_h,
+                "heat_index_c"      : hi,
+                "dominant_condition": max(set(v["conditions"]), key=v["conditions"].count),
+                "total_rain_mm"    : round(sum(v["rain"]), 1),
+            })
+        return summaries
 
     #  GNews 
     def fetch_gnews(self, query: str, label: str) -> List[Dict]:

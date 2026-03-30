@@ -67,7 +67,7 @@ RSS_FEEDS: Dict[str, str] = {
     "PIB India"          : "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
     "Hindu Business"     : "https://www.thehindubusinessline.com/economy/?service=rss",
     "LiveMint Economy"   : "https://www.livemint.com/rss/economy",
-    "POSOCO / Grid-India": "https://posoco.in/feed/",
+    "Grid-India (NLDC)"  : "https://grid-india.in/feed/",
     "NRLDC (North Grid)" : "https://nrldc.in/feed/",
     "WRLDC (West Grid)"  : "https://wrldc.in/feed/",
     "SRLDC (South Grid)" : "https://srldc.in/feed/",
@@ -85,7 +85,7 @@ class CityIntelligence:
     city_name              : str
     generated_on           : str           # ISO date string
 
-    # Discovered by LLM  NOT hardcoded
+    # Discovered by LLM — NOT hardcoded
     generation_mix         : str           # e.g. "~70% coal, ~20% hydro, ~10% solar"
     primary_fuel_sources   : List[str]     # e.g. ["WCL Wardha mines", "NTPC Korba imports"]
     fuel_supply_routes     : List[str]     # e.g. ["Central Railway WCL siding", "Koradi road corridor"]
@@ -93,7 +93,7 @@ class CityIntelligence:
     seasonal_demand_factors: List[str]     # e.g. ["Cotton ginning Oct-Dec adds ~80 MW rural"]
     demand_drivers         : List[str]     # e.g. ["IT parks", "steel rolling mills", "pumping irrigation"]
     neighboring_exchange   : List[str]     # e.g. ["Imports from Chhattisgarh via PGCIL 400kV Wardha"]
-    llm_confidence         : float         # 0.01.0 confidence in generated profile
+    llm_confidence         : float         # 0.0—1.0 confidence in generated profile
     sources_used           : List[str]     # News sources that informed this profile
 
     def is_stale(self, ttl_days: int = CITY_PROFILE_TTL_DAYS) -> bool:
@@ -111,7 +111,7 @@ class DetectedEvent:
     days_away        : int    # Days until event (0 = today/ongoing). HARD MAX = 7.
     duration_days    : int    # Expected duration
     grid_mechanism   : str    # "TV_PICKUP" | "HEAVY_INFRA" | "ROUTINE_DISRUPTION" | "MASS_GATHERING"
-    est_attendees    : str    # e.g. "50,000100,000" or "city-wide" for TV pickup
+    est_attendees    : str    # e.g. "50,000—100,000" or "city-wide" for TV pickup
     est_mw_impact    : str    # e.g. "+150 to +250 MW additional load"
     demand_direction : str    # "increase" | "decrease" | "mixed"
     confidence       : str    # "low" | "medium" | "high"
@@ -181,7 +181,7 @@ class CityIntelligenceCache:
             data = json.loads(p.read_text())
             ci = CityIntelligence(**data)
             if ci.is_stale():
-                print(f"    [CACHE] City intel for {node_id} is stale  refreshing.")
+                print(f"    [CACHE] City intel for {node_id} is stale — refreshing.")
                 return None
             print(f"    [CACHE] Loaded city intel for {node_id} (generated {ci.generated_on})")
             return ci
@@ -192,4 +192,4 @@ class CityIntelligenceCache:
     def save(self, ci: CityIntelligence) -> None:
         p = self._path(ci.node_id)
         p.write_text(json.dumps(asdict(ci), indent=2))
-        print(f"    [CACHE] Saved city intel for {ci.node_id}  {p}")
+        print(f"    [CACHE] Saved city intel for {ci.node_id} — {p}")

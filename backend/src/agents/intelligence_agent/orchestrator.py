@@ -8,13 +8,13 @@ auditable pipeline. Each agent appears explicitly by name so the
 data flow is readable without tracing method calls.
 
 AGENT EXECUTION ORDER PER NODE:
-  Phase 1    DataFetcher         (raw weather + news + RSS — no LLM)
-  Phase 2    CityIntelAgent      (city profile — cache-first, from raw news)
-  Phase 3    EventRadarAgent     (mass events / broadcast / disruption detection — from raw news)
-  Phase 4    FilterAgent         (noise kill — quality gate, cleans news for extraction)
+  Phase 1    DataFetcher         (raw weather + news + RSS - no LLM)
+  Phase 2    CityIntelAgent      (city profile - cache-first, from raw news)
+  Phase 3    EventRadarAgent     (mass events / broadcast / disruption detection - from raw news)
+  Phase 4    FilterAgent         (noise kill - quality gate, cleans news for extraction)
   Phase 5    SignalExtractorAgent (infrastructure & supply-chain signals)
-  Phase 6    ImpactNarratorAgent (expert narrative — chain-of-thought step)
-  Phase 7    MultiplierSynthAgent(numeric JSON multipliers — terminal output)
+  Phase 6    ImpactNarratorAgent (expert narrative - chain-of-thought step)
+  Phase 7    MultiplierSynthAgent(numeric JSON multipliers - terminal output)
 
 FUTURE ORCHESTRATOR INTEGRATION:
   NodeOrchestrator is intentionally designed so that an outer LLM-based
@@ -46,7 +46,7 @@ from .setup import (
 )
 from .fetching_details import DataFetcher
 
-# ── Import all sub-agents explicitly ─────────────────────────────────────────
+# -- Import all sub-agents explicitly -----------------------------------------
 from .filter_agent           import FilterAgent
 from .city_intel_agent       import CityIntelAgent
 from .event_radar_agent      import EventRadarAgent
@@ -71,7 +71,7 @@ class NodeOrchestrator:
         ci_cache        : CityIntelligenceCache,
         rss_flat        : List[str],
         today_str       : str,
-        # ── sub-agents (injected, shared) ──────────────────────────
+        # -- sub-agents (injected, shared) --------------------------
         filter_agent    : FilterAgent,
         city_intel_agent: CityIntelAgent,
         event_radar_agent: EventRadarAgent,
@@ -206,29 +206,32 @@ class NodeOrchestrator:
     def run(self, node_id: str) -> NodeResult:
         reg  = CITY_REGISTRY[node_id]
         city = reg["name"]
-        print(f"\n{'═'*60}")
+        print(f"\n{'='*60}")
         print(f"  NODE {node_id}  {city} ({reg['state']})")
-        print(f"{'═'*60}")
+        print(f"{'='*60}")
 
-        # ── Phase 1: Data Fetch (no LLM) ────────────────────────────────────
+        # -- Phase 1: Data Fetch (no LLM) ------------------------------------
         print(f"  [Phase 1] Fetching weather...")
         wx_raw = self._fetcher.fetch_owm_forecast(city, reg["lat"], reg["lon"])
         wx_hourly = self._fetcher.fetch_hourly_forecast_7d(city, reg["lat"], reg["lon"])
+        
         if "error" in wx_raw:
-            print(f"    [!] Weather error: {wx_raw['error']}")
+            print(f"    [!] OWM Weather error: {wx_raw['error']}")
         if "error" in wx_hourly:
-            print(f"    [!] Hourly weather error: {wx_hourly['error']}")
+            print(f"    [!] Open-Meteo Weather error: {wx_hourly['error']}")
 
+        # Primary source for daily summaries is now Open-Meteo (7 days)
+        # We supplement with OWM for 'current' conditions if available
         weather = WeatherSummary(
-            current_temp_c        = wx_raw.get("current_temp_c", 0.0),
-            current_humidity_pct  = wx_raw.get("current_humidity_pct", 0),
-            current_condition     = wx_raw.get("current_condition", "unknown"),
-            week_max_c            = wx_raw.get("week_max_c", 0.0),
-            week_max_heat_index_c = wx_raw.get("week_max_heat_index_c", 0.0),
-            week_total_rain_mm    = wx_raw.get("week_total_rain_mm", 0.0),
-            forecast_days         = wx_raw.get("5_day_forecast", []),
+            current_temp_c        = wx_raw.get("current_temp_c", wx_hourly.get("hourly_forecast_7d", [{}])[0].get("temperature_c", 0.0)),
+            current_humidity_pct  = wx_raw.get("current_humidity_pct", wx_hourly.get("hourly_forecast_7d", [{}])[0].get("humidity_pct", 0)),
+            current_condition     = wx_raw.get("current_condition", wx_hourly.get("hourly_forecast_7d", [{}])[0].get("condition", "unknown")),
+            week_max_c            = max([d.get("max_c", 0.0) for d in wx_hourly.get("daily_forecast_7d", [])] + [wx_raw.get("week_max_c", 0.0)]),
+            week_max_heat_index_c = max([d.get("heat_index_c", 0.0) for d in wx_hourly.get("daily_forecast_7d", [])] + [wx_raw.get("week_max_heat_index_c", 0.0)]),
+            week_total_rain_mm    = round(sum([d.get("total_rain_mm", 0.0) for d in wx_hourly.get("daily_forecast_7d", [])]), 1),
+            forecast_days         = wx_hourly.get("daily_forecast_7d", []),
             hourly_forecast_7d    = wx_hourly.get("hourly_forecast_7d", []),
-        ) if "error" not in wx_raw else None
+        ) if ("error" not in wx_hourly) else None
 
         print(f"  [Phase 1] Fetching news (4 GNews queries + NewsData)...")
         all_articles: List[Dict] = []
@@ -256,18 +259,18 @@ class NodeOrchestrator:
         all_headlines = self._build_headline_list(all_articles, self._rss_flat)
         print(f"  [Phase 1] {len(all_headlines)} raw unique headlines")
 
-        # ── Phase 2: CityIntelAgent — cache-first ───────────────────────────
+        # -- Phase 2: CityIntelAgent - cache-first ---------------------------
         print(f"  [Phase 2] CityIntelAgent: loading city profile from raw headlines...")
         intel = self._ci_cache.load(node_id)
         if intel is None:
-            print(f"  [Phase 2] Cache miss — generating fresh city profile...")
+            print(f"  [Phase 2] Cache miss - generating fresh city profile...")
             intel = self._agents[CityIntelAgent.AGENT_ROLE].build_city_intelligence(
                 node_id, reg, all_headlines
             )
             self._ci_cache.save(intel)
             print(f"  [Phase 2] City profile ready (confidence={intel.llm_confidence:.2f})")
 
-        # ── Phase 3: EventRadarAgent — detect demand-shifting events ────────
+        # -- Phase 3: EventRadarAgent - detect demand-shifting events --------
         print(f"  [Phase 3] EventRadarAgent: scanning raw headlines for demand-shifting events...")
         detected_events = self._agents[EventRadarAgent.AGENT_ROLE].detect_large_events(
             city, all_headlines, self._today_str
@@ -276,24 +279,24 @@ class NodeOrchestrator:
         for ev in detected_events:
             print(f"     [{ev.grid_mechanism}] {ev.event_name} | {ev.est_mw_impact} | conf={ev.confidence}")
 
-        # ── Phase 4: FilterAgent — quality gate for signal extraction ───────
+        # -- Phase 4: FilterAgent - quality gate for signal extraction -------
         print(f"  [Phase 4] FilterAgent: killing noise from headlines...")
         clean_headlines = self._agents[FilterAgent.AGENT_ROLE].filter_headlines(all_headlines)
         print(f"  [Phase 4] {len(clean_headlines)} high-signal headlines remain")
 
-        # ── Phase 5: SignalExtractorAgent — grid signal extraction ─────────
+        # -- Phase 5: SignalExtractorAgent - grid signal extraction ---------
         print(f"  [Phase 5] SignalExtractorAgent: extracting grid signals from clean headlines...")
         signals = self._agents[SignalExtractorAgent.AGENT_ROLE].extract_grid_signals(
             city, intel, clean_headlines
         )
 
-        # ── Phase 6: ImpactNarratorAgent — expert narrative (CoT) ─────────
+        # -- Phase 6: ImpactNarratorAgent - expert narrative (CoT) ---------
         print(f"  [Phase 6] ImpactNarratorAgent: writing demand/supply narrative...")
         impact = self._agents[ImpactNarratorAgent.AGENT_ROLE].deep_impact_analysis(
             city, reg, intel, signals, wx_raw, detected_events
         )
 
-        # ── Phase 7: MultiplierSynthAgent — numeric terminal output ────────
+        # -- Phase 7: MultiplierSynthAgent - numeric terminal output --------
         print(f"  [Phase 7] MultiplierSynthAgent: synthesising numeric multipliers...")
         multipliers = self._agents[MultiplierSynthAgent.AGENT_ROLE].synthesise_multipliers(
             city, reg["typical_peak_mw"], impact, detected_events
@@ -364,12 +367,12 @@ class SmartGridIntelligenceAgent:
 
         def _log(tag: str, data: str):
             with self._dump_path.open("a", encoding="utf-8") as f:
-                f.write(f"\n\n── {tag} ──\n{data}\n{'─'*60}\n")
+                f.write(f"\n\n-- {tag} --\n{data}\n{'-'*60}\n")
 
         self._fetcher  = DataFetcher(gnews_key, newsdata_key, owm_key, log_fn=_log)
         self._ci_cache = CityIntelligenceCache(self._cache_dir / "city_intel")
 
-        # ── Construct all sub-agents ONCE — shared across nodes ──────────────
+        # -- Construct all sub-agents ONCE - shared across nodes --------------
         self._filter_agent     = FilterAgent(self._client, log_fn=_log)
         self._city_intel_agent = CityIntelAgent(self._client, log_fn=_log)
         self._event_radar      = EventRadarAgent(self._client, log_fn=_log)
@@ -383,7 +386,7 @@ class SmartGridIntelligenceAgent:
     def _load_daily_cache(self, node_id: str) -> Optional[Dict]:
         p = self._daily_cache_path(node_id)
         if p.exists():
-            print(f"  [CACHE] Daily result cached for {node_id} — loading.")
+            print(f"  [CACHE] Daily result cached for {node_id} - loading.")
             return json.loads(p.read_text(encoding="utf-8"))
         return None
 
@@ -410,10 +413,10 @@ class SmartGridIntelligenceAgent:
         }
 
     def run_all_regions(self) -> Dict[str, Dict]:
-        print("═" + "═"*58 + "═")
-        print("   SMART GRID INTELLIGENCE AGENT  — MODULAR EDITION v4.0  ")
+        print("=" + "="*58 + "=")
+        print("   SMART GRID INTELLIGENCE AGENT - MODULAR EDITION v4.0  ")
         print(f"   Date: {self._today_str:<48} ")
-        print("═" + "═"*58 + "═")
+        print("=" + "="*58 + "=")
         print(f"\n  Active agents:")
         print(f"    Phase 2: CityIntelAgent")
         print(f"    Phase 3: EventRadarAgent")
@@ -463,17 +466,17 @@ class SmartGridIntelligenceAgent:
     @staticmethod
     def print_summary_table(intelligence: Dict[str, Dict]) -> None:
         """Pretty-print a compact operational summary table."""
-        RISK_EMOJI = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨", "UNKNOWN": "⚪"}
+        RISK_EMOJI = {"LOW": "O", "MEDIUM": "M", "HIGH": "H", "CRITICAL": "!", "UNKNOWN": "?"}
 
         header = (
             f"\n{'NODE':<6} {'CITY':<12} {'EDM':>5} {'TC':>6} {'GCM':>5} "
-            f"{'D-RISK':<10} {'S-RISK':<10} {'HOARD':>6} {'MW Δ':>7} {'CONF':>5}"
+            f"{'D-RISK':<10} {'S-RISK':<10} {'HOARD':>6} {'MW D':>7} {'CONF':>5}"
         )
-        print("\n" + "─"*75)
+        print("\n" + "-"*75)
         print("  GRID INTELLIGENCE SUMMARY TABLE")
-        print("─"*75)
+        print("-"*75)
         print(header)
-        print("─"*75)
+        print("-"*75)
 
         for nid, data in intelligence.items():
             if data.get("error"):
@@ -483,7 +486,7 @@ class SmartGridIntelligenceAgent:
             city = data.get("city", nid)
             dr   = gm.get("demand_spike_risk", "?")
             sr   = gm.get("supply_shortfall_risk", "?")
-            hoard = "🚨 YES" if gm.get("pre_event_hoard") else "   no"
+            hoard = "! YES" if gm.get("pre_event_hoard") else "   no"
 
             events   = data.get("detected_events", [])
             ev_count = len(events)
@@ -506,7 +509,7 @@ class SmartGridIntelligenceAgent:
                 ))
                 print(f"        {ev_count} event(s): {', '.join(ev_labels)}")
 
-        print("─"*75)
+        print("-"*75)
 
         print("\n  KEY DRIVERS:")
         for nid, data in intelligence.items():
@@ -515,11 +518,11 @@ class SmartGridIntelligenceAgent:
             gm  = data.get("grid_multipliers") or {}
             kd  = gm.get("key_driver", "")
             rsn = gm.get("reasoning", "")
-            print(f"  {nid} — {kd}")
+            print(f"  {nid} -- {kd}")
             if rsn:
                 for line in textwrap.wrap(rsn, width=65):
                     print(f"       {line}")
 
         print()
-        print(f"  Raw API dump → outputs/context_cache/raw_api_dump_{date.today().isoformat()}.txt")
+        print(f"  Raw API dump -> outputs/context_cache/raw_api_dump_{date.today().isoformat()}.txt")
         print()
