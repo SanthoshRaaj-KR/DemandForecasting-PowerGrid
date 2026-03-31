@@ -9,7 +9,7 @@ Defines the core Order dataclass and supporting enums so that
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Optional, Any
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +83,13 @@ class DispatchRecord:
     llm_safety_status : str     # "APPROVED" or rejection reason
     dlr_applied       : bool    # True if Dynamic Line Rating reduced capacity
     effective_capacity: float   # MW after DLR adjustment
+    requested_mw      : float = 0.0
+    line_cap_mw       : float = 0.0
+    approved_mw       : float = 0.0
+    residual_deficit_mw: float = 0.0
+    dispatch_hour     : Optional[int] = None
+    route_agent       : str = "DOUBLE_DQN_PROXY"
+    decision_trace    : list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -96,4 +103,40 @@ class SyndicateDispatchRecord:
     cleared_price_mw : float   # The blended negotiated price in ₹/MW
     buyer_bid        : float
     syndicate_sellers: list[str]
-    breakdown_log    : str
+    breakdown_log    : str
+
+
+@dataclass
+class StatePosition:
+    """
+    Deterministic state-level position after calibration and intelligence injection.
+    """
+    state_id: str
+    forecast_7d_mw: list[float]
+    avg_forecast_mw: float
+    baseline_supply_mw: float
+    todays_demand_forecast_mw: float
+    adjusted_demand_mw: float
+    adjusted_supply_mw: float
+    net_position_mw: float
+    deficit_mw: float
+    surplus_mw: float
+    economic_demand_multiplier: float
+    generation_multiplier: float
+    pre_event_hoard: bool
+    dispatch_hour_hint: int
+    reasoning: str = ""
+    phase_log: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LoadSheddingRecord:
+    """
+    Forced load-shedding action mandated by the syndicate decider.
+    """
+    state_id: str
+    shed_mw: float
+    level: str
+    reason: str
+    dispatch_hour: Optional[int] = None
+    phase_log: list[str] = field(default_factory=list)

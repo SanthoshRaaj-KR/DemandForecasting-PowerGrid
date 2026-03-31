@@ -1,5 +1,5 @@
 'use client'
-import { ArrowRight, CheckCircle, Zap, Leaf } from 'lucide-react'
+import { ArrowRight, CheckCircle, Zap, Leaf, FileText } from 'lucide-react'
 import { REGIONS } from '@/lib/gridMeta'
 import { Badge } from '@/components/ui/Primitives'
 
@@ -38,6 +38,7 @@ function normalizeDispatches(results) {
 
 export function DispatchTable({ results }) {
   const rows = normalizeDispatches(results)
+  const xaiLogs = results?.xai_log || []
 
   if (!rows.length) {
     return (
@@ -71,7 +72,7 @@ export function DispatchTable({ results }) {
         ))}
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 mb-8">
         {rows.map((trade, i) => (
           <div
             key={trade.id}
@@ -152,6 +153,36 @@ export function DispatchTable({ results }) {
           </div>
         ))}
       </div>
+
+      {xaiLogs.length > 0 && (
+        <div className="mt-8 border-t border-grid-border/40 pt-6">
+          <div className="flex items-center gap-2 mb-4 text-white">
+            <FileText className="w-5 h-5 text-purple-400" />
+            <h3 className="text-lg font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', letterSpacing: '0.05em' }}>
+              OPERATOR NARRATIVES
+            </h3>
+          </div>
+          <div className="space-y-4">
+            {xaiLogs.map((log, i) => {
+              const isAlert = log.includes('[LLM ALERT]')
+              const cleanLog = log.replace('[LLM]', '').replace('[LLM ALERT]', '').trim()
+              return (
+                <div key={i} className={`p-4 rounded-lg border bg-black/40 shadow-inner ${isAlert ? 'border-red-500/30' : 'border-purple-500/20'}`}>
+                  {isAlert && (
+                    <div className="flex items-center gap-1.5 text-red-400 mb-2 text-xs font-bold" style={{ fontFamily: 'IBM Plex Mono, monospace' }}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                      CRITICAL ALERT INCIDENT
+                    </div>
+                  )}
+                  <p className="text-sm leading-relaxed text-grid-textDim" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {cleanLog}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

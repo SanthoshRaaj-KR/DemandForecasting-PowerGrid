@@ -1,25 +1,16 @@
 """
 state_agent/state_agent.py
 ==========================
-Implements the `StateAgent` class — one instance per city.
-
-Role
-----
-Reads the city's physical state (net_mw, battery SoC) and the LLM context
-JSON produced by news_agent.py, then generates a single financial Order
-(BUY or SELL) that reflects the city's desperation level.
-
-Design principle
-----------------
-All magic numbers live in `shared/constants.py`.  The agent itself is pure
-decision logic with no hard-coded prices.
+Deterministic state-node logic for calibration, intelligence injection,
+and order generation.
 """
 
 from __future__ import annotations
+
 import logging
 from typing import Any
 
-from ..shared.models    import Order, OrderType, RiskLevel
+from ..shared.models import Order, OrderType, RiskLevel, StatePosition
 from ..shared.constants import (
     BASELINE_ASK_PRICE,
     DISTRESSED_ASK_PRICE,
@@ -33,153 +24,223 @@ logger = logging.getLogger(__name__)
 
 class StateAgent:
     """
-    Local trading agent for a single city node in the India Grid Digital Twin.
+    Local trading agent for one state node.
 
-    Parameters
-    ----------
-    city_id     : Short identifier for the city, e.g. "DEL", "MUM".
-    net_mw      : Signed MW balance.
-                    > 0  →  surplus (wants to sell)
-                    < 0  →  deficit (wants to buy)
-                    = 0  →  balanced (no order generated)
-    battery_soc : Battery State-of-Charge in percent (0–100).
-                  Used to detect a "full battery" distress condition for sellers.
-    llm_context : Dictionary produced by news_agent.py for this city.
-                  Expected keys:
-                    - "hoard_flag"         (bool)   : True if a mega-event is imminent.
-                    - "demand_spike_risk"  (str)    : "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
-                    - "temperature_anomaly" (float) : °C above seasonal baseline
-                      (used downstream by RoutingAgent for DLR; stored here for completeness)
+    Backward-compatible constructor fields (`net_mw`, `battery_soc`, `llm_context`)
+    are preserved for existing market order generation.
     """
 
     def __init__(
         self,
-        city_id    : str,
-        net_mw     : float,
+        city_id: str,
+        net_mw: float,
         battery_soc: float,
         llm_context: dict[str, Any],
     ) -> None:
-        self.city_id     = city_id
-        self.net_mw      = net_mw
+        self.city_id = city_id
+        self.net_mw = net_mw
         self.battery_soc = battery_soc
         self.llm_context = llm_context
 
-        # Parse LLM context once at construction time for clean downstream use
-        self.hoard_flag          : bool      = bool(llm_context.get("hoard_flag", False))
-        self.demand_spike_risk   : RiskLevel = self._parse_risk(llm_context.get("demand_spike_risk", "LOW"))
-        self.temperature_anomaly : float     = float(llm_context.get("temperature_anomaly", 0.0))
+        self.hoard_flag: bool = bool(
+            llm_context.get("hoard_flag", llm_context.get("pre_event_hoard", False))
+        )
+        self.demand_spike_risk: RiskLevel = self._parse_risk(
+            llm_context.get("demand_spike_risk", "LOW")
+        )
+        self.temperature_anomaly: float = float(llm_context.get("temperature_anomaly", 0.0))
 
     # ------------------------------------------------------------------
-    # Public API
+    # Phase-1 + Phase-2 deterministic math
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def calibrate_baseline_supply(
+        forecast_7d_mw: list[float],
+        safety_buffer: float = 1.05,
+    ) -> float:
+        if not forecast_7d_mw:
+            return 0.0
+        avg_forecast = sum(float(v) for v in forecast_7d_mw) / float(len(forecast_7d_mw))
+        return avg_forecast * float(safety_buffer)
+
+    def evaluate_state_position(
+        self,
+        forecast_7d_mw: list[float],
+        todays_demand_forecast_mw: float,
+        intelligence: dict[str, Any],
+        safety_buffer: float = 1.05,
+        pre_event_hour: int = 3,
+        normal_dispatch_hour: int = 14,
+    ) -> StatePosition:
+        """
+        Implements exact daily math sequence:
+        1) baseline supply calibration from 7-day forecast
+        2) intelligence multiplier injection
+        3) mathematically verified net deficit/surplus
+        4) temporal pre-event dispatch hint
+        """
+        edm = float(
+            intelligence.get(
+                "economic_demand_multiplier",
+                intelligence.get("demand_multiplier", 1.0),
+            )
+        )
+        gmm = float(
+            intelligence.get(
+                "generation_multiplier",
+                intelligence.get("generation_capacity_multiplier", 1.0),
+            )
+        )
+        pre_event_hoard = bool(
+            intelligence.get("pre_event_hoard", intelligence.get("hoard_flag", False))
+        )
+
+        avg_forecast = (
+            sum(float(v) for v in forecast_7d_mw) / float(len(forecast_7d_mw))
+            if forecast_7d_mw
+            else 0.0
+        )
+        baseline_supply = self.calibrate_baseline_supply(forecast_7d_mw, safety_buffer=safety_buffer)
+
+        adjusted_demand = float(todays_demand_forecast_mw) * edm
+        adjusted_supply = baseline_supply * gmm
+        net = adjusted_supply - adjusted_demand
+        deficit = abs(net) if net < 0 else 0.0
+        surplus = net if net > 0 else 0.0
+
+        dispatch_hour_hint = pre_event_hour if pre_event_hoard else normal_dispatch_hour
+
+        phase_log = [
+            (
+                f"PHASE_1_CALIBRATION state={self.city_id} avg_forecast={avg_forecast:.2f} "
+                f"safety_buffer={safety_buffer:.2f} baseline_supply={baseline_supply:.2f}"
+            ),
+            (
+                f"PHASE_2_INTELLIGENCE state={self.city_id} today_forecast={todays_demand_forecast_mw:.2f} "
+                f"economic_demand_multiplier={edm:.3f} generation_multiplier={gmm:.3f} "
+                f"adjusted_demand={adjusted_demand:.2f} adjusted_supply={adjusted_supply:.2f} "
+                f"net={net:.2f} deficit={deficit:.2f} surplus={surplus:.2f}"
+            ),
+            (
+                f"PHASE_2_TEMPORAL state={self.city_id} pre_event_hoard={pre_event_hoard} "
+                f"dispatch_hour_hint={dispatch_hour_hint:02d}:00"
+            ),
+        ]
+
+        return StatePosition(
+            state_id=self.city_id,
+            forecast_7d_mw=[float(v) for v in forecast_7d_mw],
+            avg_forecast_mw=avg_forecast,
+            baseline_supply_mw=baseline_supply,
+            todays_demand_forecast_mw=float(todays_demand_forecast_mw),
+            adjusted_demand_mw=adjusted_demand,
+            adjusted_supply_mw=adjusted_supply,
+            net_position_mw=net,
+            deficit_mw=deficit,
+            surplus_mw=surplus,
+            economic_demand_multiplier=edm,
+            generation_multiplier=gmm,
+            pre_event_hoard=pre_event_hoard,
+            dispatch_hour_hint=dispatch_hour_hint,
+            reasoning=str(intelligence.get("narrative", intelligence.get("reasoning", ""))),
+            phase_log=phase_log,
+        )
+
+    def negotiation_line(
+        self,
+        state_position: StatePosition,
+        counterparty: str,
+        hard_cap_mw: float,
+        role: str,
+    ) -> str:
+        """
+        One-sentence LLM-style negotiation line grounded in math constraints.
+        """
+        if role.upper() == "BUYER":
+            return (
+                f"{self.city_id} requests {state_position.deficit_mw:.2f} MW from {counterparty}; "
+                f"intelligence-adjusted deficit is {state_position.deficit_mw:.2f} MW, "
+                f"request window {state_position.dispatch_hour_hint:02d}:00, "
+                f"accepting dispatcher cap up to {hard_cap_mw:.2f} MW."
+            )
+        return (
+            f"{self.city_id} can offer capped transfer of {hard_cap_mw:.2f} MW to {counterparty}; "
+            f"available surplus is {state_position.surplus_mw:.2f} MW under current constraints."
+        )
+
+    # ------------------------------------------------------------------
+    # Backward-compatible order generation
     # ------------------------------------------------------------------
 
     def generate_order(self) -> Order | None:
-        """
-        Evaluate the city's state and produce a BUY or SELL Order.
-
-        Returns None if the city is perfectly balanced (net_mw == 0).
-        """
         if self.net_mw > 0:
             return self._build_sell_order()
-        elif self.net_mw < 0:
+        if self.net_mw < 0:
             return self._build_buy_order()
-        else:
-            logger.info("[%s] Net MW is zero — no order generated.", self.city_id)
-            return None
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        logger.info("[%s] Net MW is zero; no order generated.", self.city_id)
+        return None
 
     def _build_sell_order(self) -> Order:
-        """
-        Surplus city → SELL order.
-
-        Pricing tiers
-        -------------
-        • Battery nearly full (SoC > threshold) → distressed ask (₹1.5/MW)
-          The city MUST offload or waste renewable generation.
-        • Normal surplus → baseline ask (₹3/MW).
-        """
         battery_full = self.battery_soc > BATTERY_FULL_SOC_THRESHOLD
 
         if battery_full:
-            price  = DISTRESSED_ASK_PRICE
+            price = DISTRESSED_ASK_PRICE
             reason = (
-                f"Battery SoC is {self.battery_soc:.1f}% (>{BATTERY_FULL_SOC_THRESHOLD}%). "
-                f"Desperate to offload surplus — distressed ask of ₹{price}/MW."
+                f"Battery SoC {self.battery_soc:.1f}% (> {BATTERY_FULL_SOC_THRESHOLD}%). "
+                f"Distressed ask {price:.2f} INR/MW."
             )
         else:
-            price  = BASELINE_ASK_PRICE
+            price = BASELINE_ASK_PRICE
             reason = (
-                f"Normal surplus of {self.net_mw:.1f} MW with battery at {self.battery_soc:.1f}%. "
-                f"Standard ask of ₹{price}/MW."
+                f"Normal surplus {self.net_mw:.1f} MW with battery {self.battery_soc:.1f}%. "
+                f"Standard ask {price:.2f} INR/MW."
             )
 
-        logger.debug("[%s] SELL order: %.1f MW @ ₹%.2f/MW | %s", self.city_id, self.net_mw, price, reason)
-
         return Order(
-            city_id      = self.city_id,
-            order_type   = OrderType.SELL,
-            quantity_mw  = self.net_mw,          # always positive for surplus
-            price_per_mw = price,
-            reason       = reason,
+            city_id=self.city_id,
+            order_type=OrderType.SELL,
+            quantity_mw=self.net_mw,
+            price_per_mw=price,
+            reason=reason,
         )
 
     def _build_buy_order(self) -> Order:
-        """
-        Deficit city → BUY order.
-
-        Pricing tiers
-        -------------
-        • hoard_flag is True  → panic bid (₹15/MW): mega-event imminent, buy at any cost.
-        • demand_spike_risk is CRITICAL → panic bid (₹15/MW): grid-level emergency.
-        • Otherwise → baseline bid (₹5/MW).
-        """
-        quantity = abs(self.net_mw)   # always positive
-
-        # Agentic Panic condition
+        quantity = abs(self.net_mw)
         panic = self.hoard_flag or (self.demand_spike_risk == RiskLevel.CRITICAL)
 
         if panic:
             price = PANIC_BID_PRICE
             triggers = []
             if self.hoard_flag:
-                triggers.append("hoard_flag=True (mega-event imminent)")
+                triggers.append("pre_event_hoard=True")
             if self.demand_spike_risk == RiskLevel.CRITICAL:
                 triggers.append("demand_spike_risk=CRITICAL")
             reason = (
-                f"PANIC BID triggered by: {', '.join(triggers)}. "
-                f"City will pay up to ₹{price}/MW to secure power."
+                f"PANIC BID due to {', '.join(triggers)}. "
+                f"Max bid {price:.2f} INR/MW."
             )
         else:
-            price  = BASELINE_BID_PRICE
+            price = BASELINE_BID_PRICE
             reason = (
-                f"Normal deficit of {quantity:.1f} MW. "
-                f"Risk level: {self.demand_spike_risk.value}. "
-                f"Standard bid of ₹{price}/MW."
+                f"Normal deficit {quantity:.1f} MW, risk {self.demand_spike_risk.value}. "
+                f"Standard bid {price:.2f} INR/MW."
             )
 
-        logger.debug("[%s] BUY order: %.1f MW @ ₹%.2f/MW | %s", self.city_id, quantity, price, reason)
-
         return Order(
-            city_id      = self.city_id,
-            order_type   = OrderType.BUY,
-            quantity_mw  = quantity,
-            price_per_mw = price,
-            reason       = reason,
+            city_id=self.city_id,
+            order_type=OrderType.BUY,
+            quantity_mw=quantity,
+            price_per_mw=price,
+            reason=reason,
         )
 
     @staticmethod
     def _parse_risk(raw: str) -> RiskLevel:
-        """
-        Safely coerce the LLM context string to a RiskLevel enum.
-        Defaults to LOW if the value is unrecognised.
-        """
         try:
-            return RiskLevel(raw.upper())
+            return RiskLevel(str(raw).upper())
         except (ValueError, AttributeError):
-            logger.warning("Unrecognised demand_spike_risk value '%s' — defaulting to LOW.", raw)
+            logger.warning("Unrecognized demand_spike_risk '%s'; defaulting to LOW.", raw)
             return RiskLevel.LOW
 
     def __repr__(self) -> str:
