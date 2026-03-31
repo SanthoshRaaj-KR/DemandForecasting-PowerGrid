@@ -1,8 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    optimizePackageImports: ['lucide-react', 'recharts'],
-  },
-}
+const nextConfig = {}
 
 module.exports = nextConfig
