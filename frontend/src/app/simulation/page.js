@@ -137,7 +137,7 @@ export default function SimulationPage() {
             <div className="flex items-center justify-between">
               <SectionLabel>Live Grid Topology</SectionLabel>
               <Badge variant={running ? 'red' : 'cyan'}>
-                {running ? 'ACTIVE TRADES' : 'STATIC VIEW'}
+                {running ? 'ACTIVE TRADES' : done ? 'POST-SIMULATION' : 'STATIC VIEW'}
               </Badge>
             </div>
             <Card className="glow-cyan">
@@ -151,7 +151,7 @@ export default function SimulationPage() {
             </Card>
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {topCongested.map((line, index) => {
+              {topCongested.length > 0 ? topCongested.map((line, index) => {
                 const congestion = Math.round(Number(line.congestion || 0) * 100)
                 const flow = Number(line.flow_mw || 0).toFixed(0)
                 const capacity = Number(line.capacity_mw || 5000).toFixed(0)
@@ -168,14 +168,14 @@ export default function SimulationPage() {
                        <span className="text-[10px] font-bold text-white px-2 py-0.5 bg-white/5 rounded border border-white/10 uppercase font-mono tracking-tighter">
                           {line.src} → {line.dst}
                        </span>
-                       <Badge variant={congestion > 80 ? 'red' : 'cyan'}>
-                          {congestion > 80 ? 'CRITICAL' : 'SAT_NORMAL'}
+                       <Badge variant={congestion > 80 ? 'red' : congestion > 60 ? 'amber' : 'cyan'}>
+                          {congestion > 80 ? 'CRITICAL' : congestion > 60 ? 'HIGH' : 'NOMINAL'}
                        </Badge>
                     </div>
 
                     <div className="flex justify-between items-end mb-2">
                        <div className="flex flex-col">
-                          <span className="text-[9px] text-grid-textDim uppercase font-mono">Net Transfer / Total Capacity</span>
+                          <span className="text-[9px] text-grid-textDim uppercase font-mono">Flow / Capacity</span>
                           <span className="text-sm font-bold text-grid-text" style={{ fontFamily: 'IBM Plex Mono' }}>
                             {flow} <span className="text-[10px] opacity-40">/</span> {capacity} <span className="text-[10px] opacity-40 italic">MW</span>
                           </span>
@@ -197,7 +197,14 @@ export default function SimulationPage() {
                     </div>
                   </div>
                 )
-              })}
+              }) : (
+                <div className="col-span-full text-center py-8">
+                  <Network className="w-12 h-12 text-grid-textDim/30 mx-auto mb-3" />
+                  <p className="text-sm text-grid-textDim">
+                    {done ? 'All corridors clear - no congestion' : 'Run simulation to see line congestion'}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

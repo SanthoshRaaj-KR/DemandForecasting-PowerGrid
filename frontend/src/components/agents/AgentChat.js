@@ -22,21 +22,36 @@ function parseLog(text) {
   }
 }
 
+// Filter to show only relevant agent decisions (after emergency energy adjustments)
+function filterRelevantLogs(logs) {
+  return logs.filter(log => {
+    const text = log.text || ''
+    // Skip early calibration/setup logs
+    if (text.includes('PHASE_1') || text.includes('PHASE_2')) return false
+    if (text.includes('Calibrating') || text.includes('baseline')) return false
+    // Show demand/supply decisions, routing, and negotiations
+    return text.includes('demand') || text.includes('supply') || 
+           text.includes('NEGOTIATE') || text.includes('routing') ||
+           text.includes('deficit') || text.includes('surplus') ||
+           text.includes('approved') || text.includes('MW')
+  })
+}
+
 export function AgentChat({ logs }) {
   const [filterAgent, setFilterAgent] = useState('ALL')
 
-  const agentLogs = logs.filter(log => AGENT_DEFS[log.agent])
+  const relevantLogs = filterRelevantLogs(logs.filter(log => AGENT_DEFS[log.agent]))
   const filteredLogs = filterAgent === 'ALL' 
-    ? agentLogs 
-    : agentLogs.filter(log => log.agent === filterAgent)
+    ? relevantLogs
+    : relevantLogs.filter(log => log.agent === filterAgent)
 
-  if (agentLogs.length === 0) {
+  if (relevantLogs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-grid-border/20 rounded-xl bg-white/2">
         <MessageSquare className="w-12 h-12 text-grid-textDim mb-3 opacity-20" />
         <span className="text-sm text-white mb-1">No Agent Activity Yet</span>
         <span className="text-[10px] uppercase tracking-[0.2em] text-grid-textDim" style={{ fontFamily: 'IBM Plex Mono, monospace' }}>
-           Run simulation to see agent negotiations
+           Run simulation to see demand/supply negotiations
         </span>
       </div>
     )
@@ -46,7 +61,7 @@ export function AgentChat({ logs }) {
     <div className="space-y-4">
       {/* Filter Bar */}
       <div className="flex items-center gap-2 pb-3 border-b border-grid-border/30">
-        <span className="text-[10px] text-grid-textDim uppercase tracking-wider mr-2">Filter:</span>
+        <span className="text-[10px] text-grid-textDim uppercase tracking-wider mr-2">Show:</span>
         <button
           onClick={() => setFilterAgent('ALL')}
           className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
@@ -55,10 +70,10 @@ export function AgentChat({ logs }) {
               : 'bg-white/5 text-grid-textDim border border-grid-border/30 hover:bg-white/10'
           }`}
         >
-          All ({agentLogs.length})
+          All Decisions ({relevantLogs.length})
         </button>
         {Object.entries(AGENT_DEFS).map(([key, def]) => {
-          const count = agentLogs.filter(log => log.agent === key).length
+          const count = relevantLogs.filter(log => log.agent === key).length
           if (count === 0) return null
           return (
             <button
@@ -81,11 +96,11 @@ export function AgentChat({ logs }) {
         })}
       </div>
 
-      {/* Agent Messages - Chat Style */}
+      {/* Agent Messages - Demand/Supply Focus */}
       <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
         {filteredLogs.length === 0 ? (
           <div className="text-center text-grid-textDim text-sm py-8">
-            No messages from this agent
+            No decisions from this agent
           </div>
         ) : (
           filteredLogs.map((log, i) => {
@@ -100,7 +115,6 @@ export function AgentChat({ logs }) {
                 className="group relative"
                 style={{ animation: `fade-in 0.3s ease-out ${i * 0.05}s both` }}
               >
-                {/* Message Card */}
                 <div className="flex gap-3">
                   {/* Agent Avatar */}
                   <div 
@@ -116,7 +130,6 @@ export function AgentChat({ logs }) {
 
                   {/* Message Content */}
                   <div className="flex-1 min-w-0">
-                    {/* Agent Name & Timestamp */}
                     <div className="flex items-center gap-2 mb-1.5">
                       <span 
                         className="font-bold text-sm"
@@ -124,14 +137,10 @@ export function AgentChat({ logs }) {
                       >
                         {def.name}
                       </span>
-                      <span className="text-[10px] text-grid-textDim">
-                        Step {i + 1}
-                      </span>
                     </div>
 
-                    {/* Message Bubble */}
                     <div 
-                      className="rounded-lg p-4 border-l-4"
+                      className="rounded-lg p-3 border-l-4"
                       style={{
                         backgroundColor: `${def.color}08`,
                         borderLeftColor: def.color,
@@ -140,30 +149,16 @@ export function AgentChat({ logs }) {
                         borderBottom: `1px solid ${def.color}20`,
                       }}
                     >
-                      {/* Main Action */}
-                      <div className="flex items-start gap-2 mb-2">
+                      <div className="flex items-start gap-2">
                         <Icon className="w-4 h-4 mt-0.5 shrink-0" style={{ color: def.color }} />
                         <p className="text-sm text-white font-medium leading-relaxed">
                           {action}
                         </p>
                       </div>
 
-                      {/* Reasoning */}
                       {reason && (
-                        <div className="pl-6 mb-2 text-xs text-grid-text leading-relaxed italic border-l-2 border-grid-border/30 ml-1">
-                          💡 {reason}
-                        </div>
-                      )}
-
-                      {/* Details */}
-                      {details && (
-                        <div className="mt-3 pt-3 border-t border-grid-border/20">
-                          <div className="text-[10px] text-grid-textDim uppercase tracking-wider mb-1.5">
-                            Technical Details
-                          </div>
-                          <p className="text-xs text-grid-text/80 leading-relaxed font-mono">
-                            {details}
-                          </p>
+                        <div className="pl-6 mt-2 text-xs text-grid-text leading-relaxed italic border-l-2 border-grid-border/30 ml-1">
+                          {reason}
                         </div>
                       )}
                     </div>
@@ -178,11 +173,11 @@ export function AgentChat({ logs }) {
       {/* Summary Footer */}
       <div className="pt-3 border-t border-grid-border/30 flex items-center justify-between text-xs">
         <span className="text-grid-textDim">
-          Showing {filteredLogs.length} of {agentLogs.length} messages
+          {filteredLogs.length} key decisions
         </span>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-green-400">Live Feed Active</span>
+          <span className="text-green-400">Live</span>
         </div>
       </div>
     </div>
