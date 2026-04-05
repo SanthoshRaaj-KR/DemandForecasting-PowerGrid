@@ -1,0 +1,112 @@
+{
+  "nodes": {
+    "BHR": {
+      "name": "Bihar",
+      "generation_mw": 9000,
+      "coords": [
+        25.59,
+        85.13
+      ],
+      "battery": {
+        "capacity": 500,
+        "initial_charge": 250
+      }
+    },
+    "UP": {
+      "name": "NR UP",
+      "generation_mw": 15000,
+      "coords": [
+        26.84,
+        80.94
+      ],
+      "battery": {
+        "capacity": 800,
+        "initial_charge": 400
+      }
+    },
+    "WB": {
+      "name": "West Bengal",
+      "generation_mw": 11000,
+      "coords": [
+        22.57,
+        88.36
+      ],
+      "battery": {
+        "capacity": 600,
+        "initial_charge": 300
+      }
+    },
+    "KAR": {
+      "name": "SR Karnataka",
+      "generation_mw": 14000,
+      "coords": [
+        12.97,
+        77.59
+      ],
+      "battery": {
+        "capacity": 1000,
+        "initial_charge": 500
+      }
+    }
+  },
+  "corridors": [
+    {
+      "src": "BHR",
+      "dst": "UP",
+      "distance_km": 500,
+      "loss_pct": 0.015,
+      "capacity_mw": 3000,
+      "tariff": 4.0
+    },
+    {
+      "src": "BHR",
+      "dst": "WB",
+      "distance_km": 600,
+      "loss_pct": 0.018,
+      "capacity_mw": 2500,
+      "tariff": 3.0
+    },
+    {
+      "src": "BHR",
+      "dst": "KAR",
+      "distance_km": 1800,
+      "loss_pct": 0.04,
+      "capacity_mw": 2000,
+      "tariff": 8.0
+    },
+    {
+      "src": "UP",
+      "dst": "WB",
+      "distance_km": 1000,
+      "loss_pct": 0.025,
+      "capacity_mw": 3500,
+      "tariff": 5.0
+    },
+    {
+      "src": "UP",
+      "dst": "KAR",
+      "distance_km": 1600,
+      "loss_pct": 0.035,
+      "capacity_mw": 3500,
+      "tariff": 7.0
+    },
+    {
+      "src": "WB",
+      "dst": "KAR",
+      "distance_km": 1700,
+      "loss_pct": 0.038,
+      "capacity_mw": 3000,
+      "tariff": 6.0
+    }
+  ],
+  "demand_profile": {
+    "base_fractions": {
+      "BHR": 1.1,
+      "UP": 1.05,
+      "WB": 1.15,
+      "KAR": 0.9
+    },
+    "noise_std": 0.05,
+    "floor_ratio": 0.5
+  }
+}

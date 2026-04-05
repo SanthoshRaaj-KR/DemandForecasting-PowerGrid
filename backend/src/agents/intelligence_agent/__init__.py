@@ -17,6 +17,7 @@ Orchestration:
 """
 
 from .base_agent             import BaseLLMAgent
+from .intelligence_agent     import IntelligenceAgent
 from .filter_agent           import FilterAgent
 from .city_intel_agent       import CityIntelAgent
 from .event_radar_agent      import EventRadarAgent
@@ -27,6 +28,7 @@ from .orchestrator           import NodeOrchestrator, SmartGridIntelligenceAgent
 
 __all__ = [
     "BaseLLMAgent",
+    "IntelligenceAgent",
     "FilterAgent",
     "CityIntelAgent",
     "EventRadarAgent",

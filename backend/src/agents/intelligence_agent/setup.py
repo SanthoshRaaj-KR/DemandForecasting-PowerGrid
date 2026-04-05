@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -119,6 +120,16 @@ class DetectedEvent:
     affected_corridors: List[str]
 
 
+class GridEvent(BaseModel):
+    """Phase 1 structured grid event used by downstream deterministic phases."""
+
+    event_name: str
+    affected_states: List[str] = Field(default_factory=list)
+    demand_multiplier: float = Field(ge=0.0)
+    supply_multiplier: float = Field(ge=0.0)
+    confidence_score: float = Field(ge=0.0, le=1.0)
+
+
 @dataclass
 class WeatherSummary:
     current_temp_c       : float
@@ -154,6 +165,7 @@ class NodeResult:
     generated_at        : str
     weather             : Optional[WeatherSummary]
     city_intelligence   : Optional[CityIntelligence]
+    phase_1_grid_events : List[GridEvent]
     detected_events     : List[DetectedEvent]
     extracted_signals   : str
     impact_narrative    : str

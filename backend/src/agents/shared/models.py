@@ -127,6 +127,11 @@ class StatePosition:
     generation_multiplier: float
     pre_event_hoard: bool
     dispatch_hour_hint: int
+    is_deficit: bool = False
+    dr_savings_inr: float = 0.0
+    dr_activated_mw: float = 0.0
+    current_import_tariff: float = 0.0
+    dr_clearing_price: float = 0.0
     reasoning: str = ""
     phase_log: list[str] = field(default_factory=list)
 
@@ -142,3 +147,15 @@ class LoadSheddingRecord:
     reason: str
     dispatch_hour: Optional[int] = None
     phase_log: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProposedTrade:
+    """
+    Phase-6 schema-bound deterministic trade proposal.
+    """
+    buyer_state: str
+    seller_state: str
+    requested_mw: float
+    approved_mw: float = 0.0
+    reason: str = ""

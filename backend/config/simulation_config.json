@@ -1,0 +1,18 @@
+{
+  "simulation_days": 1,
+  "default_import_tariff_inr": 10.0,
+  "default_dr_clearing_price_inr": 6.0,
+  "phase4_risk_tolerance_mw": 500.0,
+  "pre_event_hoard_hour": 3,
+  "normal_dispatch_hour": 14,
+  "model_input_defaults": {
+    "om_temp_mean": 25.0,
+    "nasa_solar": 2.5,
+    "om_dewpoint": 15.0,
+    "om_wind_gusts": 20.0
+  },
+  "fallback_forecast_multipliers": {
+    "default": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "UP": [1.0, 1.0, 1.25, 1.0, 1.0, 1.0, 1.0]
+  }
+}

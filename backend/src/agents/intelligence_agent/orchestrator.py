@@ -42,9 +42,10 @@ from openai import OpenAI
 
 from .setup import (
     CITY_REGISTRY, HEADLINE_DEDUP_CHARS,
-    CityIntelligenceCache, NodeResult, WeatherSummary,
+    CityIntelligenceCache, GridEvent, NodeResult, WeatherSummary,
 )
 from .fetching_details import DataFetcher
+from .intelligence_agent import IntelligenceAgent
 
 # -- Import all sub-agents explicitly -----------------------------------------
 from .filter_agent           import FilterAgent
@@ -83,6 +84,7 @@ class NodeOrchestrator:
         self._ci_cache    = ci_cache
         self._rss_flat    = rss_flat
         self._today_str   = today_str
+        self._phase_1_intelligence_agent = IntelligenceAgent()
 
         # Named for future dynamic dispatch by orchestrator agent
         self._agents = {
@@ -134,6 +136,7 @@ class NodeOrchestrator:
         all_headlines: List[str],
         clean_headlines: List[str],
         intel: Any,
+        phase_1_grid_events: List[GridEvent],
         detected_events: List[Any],
         signals: str,
         impact: str,
@@ -147,6 +150,8 @@ class NodeOrchestrator:
                 "status": "completed",
                 "raw_headline_count": len(all_headlines),
                 "raw_headline_samples": all_headlines[:5],
+                "phase_1_grid_event_count": len(phase_1_grid_events),
+                "phase_1_grid_events": [evt.model_dump() for evt in phase_1_grid_events],
                 "weather_snapshot": {
                     "current_temp_c": weather.current_temp_c if weather else 0.0,
                     "week_max_c": weather.week_max_c if weather else 0.0,
@@ -258,6 +263,8 @@ class NodeOrchestrator:
 
         all_headlines = self._build_headline_list(all_articles, self._rss_flat)
         print(f"  [Phase 1] {len(all_headlines)} raw unique headlines")
+        phase_1_grid_events = self._phase_1_intelligence_agent.fetch_daily_events()
+        print(f"  [Phase 1] Structured grid events generated: {len(phase_1_grid_events)}")
 
         # -- Phase 2: CityIntelAgent - cache-first ---------------------------
         print(f"  [Phase 2] CityIntelAgent: loading city profile from raw headlines...")
@@ -314,6 +321,7 @@ class NodeOrchestrator:
             all_headlines=all_headlines,
             clean_headlines=clean_headlines,
             intel=intel,
+            phase_1_grid_events=phase_1_grid_events,
             detected_events=detected_events,
             signals=signals,
             impact=impact,
@@ -326,6 +334,7 @@ class NodeOrchestrator:
             generated_at      = self._today_str,
             weather           = weather,
             city_intelligence = intel,
+            phase_1_grid_events = phase_1_grid_events,
             detected_events   = detected_events,
             extracted_signals = signals,
             impact_narrative  = impact,
@@ -405,6 +414,7 @@ class SmartGridIntelligenceAgent:
             "error"            : r.error,
             "weather"          : asdict(r.weather) if r.weather else None,
             "city_intelligence": asdict(r.city_intelligence) if r.city_intelligence else None,
+            "phase_1_grid_events": [evt.model_dump() for evt in r.phase_1_grid_events],
             "detected_events"  : [asdict(e) for e in r.detected_events],
             "extracted_signals": r.extracted_signals,
             "impact_narrative" : r.impact_narrative,

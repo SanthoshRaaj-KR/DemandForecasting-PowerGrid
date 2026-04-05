@@ -20,7 +20,9 @@ Run standalone to see a full daily simulation printout:
 import networkx as nx
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 
@@ -296,63 +298,109 @@ class GridEnvironment:
     All above paths are bidirectional — reversed edge keys used.
     """
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, config_path: str | None = None):
         self.rng  = np.random.default_rng(seed)
         self.day  = 0
         self.log  : List[Dict] = []
+        self._config = self._load_config(config_path)
+        demand_profile = self._config.get("demand_profile", {})
+        self._demand_base_fractions = demand_profile.get(
+            "base_fractions",
+            {"BHR": 1.10, "UP": 1.05, "WB": 1.15, "KAR": 0.90},
+        )
+        self._demand_noise_std = float(demand_profile.get("noise_std", 0.05))
+        self._demand_floor_ratio = float(demand_profile.get("floor_ratio", 0.5))
 
         self._build_nodes()
         self._build_edges()
         self._build_paths()
         self._build_graph()   # networkx graph (for visualisation/reference)
 
+    def _load_config(self, config_path: str | None) -> Dict:
+        if not config_path:
+            config_path = str(Path(__file__).resolve().parents[3] / "config" / "grid_config.json")
+        p = Path(config_path)
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
     # ── construction ──────────────────────────
 
     def _build_nodes(self):
-        self.nodes: Dict[str, RegionNode] = {
-            "BHR": RegionNode(
-                node_id="BHR", name="Bihar",
-                generation_mw=9000,
-                coords=(25.59, 85.13),
-                battery=BatteryCell("BHR", capacity=500, charge=250)
-            ),
-            "UP": RegionNode(
-                node_id="UP", name="NR UP",
-                generation_mw=15000,
-                coords=(26.84, 80.94),
-                battery=BatteryCell("UP", capacity=800, charge=400)
-            ),
-            "WB": RegionNode(
-                node_id="WB", name="West Bengal",
-                generation_mw=11000,
-                coords=(22.57, 88.36),
-                battery=BatteryCell("WB", capacity=600, charge=300)
-            ),
-            "KAR": RegionNode(
-                node_id="KAR", name="SR Karnataka",
-                generation_mw=14000,
-                coords=(12.97, 77.59),
-                battery=BatteryCell("KAR", capacity=1000, charge=500)
-            ),
-        }
+        node_cfg = self._config.get("nodes", {})
+        if not node_cfg:
+            node_cfg = {
+                "BHR": {
+                    "name": "Bihar",
+                    "generation_mw": 9000,
+                    "coords": [25.59, 85.13],
+                    "battery": {"capacity": 500, "initial_charge": 250},
+                },
+                "UP": {
+                    "name": "NR UP",
+                    "generation_mw": 15000,
+                    "coords": [26.84, 80.94],
+                    "battery": {"capacity": 800, "initial_charge": 400},
+                },
+                "WB": {
+                    "name": "West Bengal",
+                    "generation_mw": 11000,
+                    "coords": [22.57, 88.36],
+                    "battery": {"capacity": 600, "initial_charge": 300},
+                },
+                "KAR": {
+                    "name": "SR Karnataka",
+                    "generation_mw": 14000,
+                    "coords": [12.97, 77.59],
+                    "battery": {"capacity": 1000, "initial_charge": 500},
+                },
+            }
+
+        self.nodes = {}
+        for node_id, meta in node_cfg.items():
+            battery_meta = meta.get("battery")
+            battery = None
+            if battery_meta:
+                battery = BatteryCell(
+                    node_id=node_id,
+                    capacity=float(battery_meta.get("capacity", 0.0)),
+                    charge=float(battery_meta.get("initial_charge", 0.0)),
+                )
+            self.nodes[node_id] = RegionNode(
+                node_id=node_id,
+                name=str(meta.get("name", node_id)),
+                generation_mw=float(meta.get("generation_mw", 0.0)),
+                coords=(float(meta.get("coords", [0.0, 0.0])[0]), float(meta.get("coords", [0.0, 0.0])[1])),
+                battery=battery,
+            )
 
     def _build_edges(self):
         """
         All edges are bidirectional but stored directionally.
         Each physical corridor appears twice (A→B and B→A).
         """
-        corridors = [
-            # (src, dst, km,   loss,  capacity_mw, tariff ₹/MWh)
-            ("BHR", "UP",   500, 0.015, 3000, 4.0),
-            ("BHR", "WB",   600, 0.018, 2500, 3.0),
-            ("BHR", "KAR", 1800, 0.040, 2000, 8.0),
-            ("UP",  "WB",  1000, 0.025, 3500, 5.0),
-            ("UP",  "KAR", 1600, 0.035, 3500, 7.0),
-            ("WB",  "KAR", 1700, 0.038, 3000, 6.0),
-        ]
+        corridors_cfg = self._config.get("corridors", [])
+        if not corridors_cfg:
+            corridors_cfg = [
+                {"src": "BHR", "dst": "UP", "distance_km": 500, "loss_pct": 0.015, "capacity_mw": 3000, "tariff": 4.0},
+                {"src": "BHR", "dst": "WB", "distance_km": 600, "loss_pct": 0.018, "capacity_mw": 2500, "tariff": 3.0},
+                {"src": "BHR", "dst": "KAR", "distance_km": 1800, "loss_pct": 0.040, "capacity_mw": 2000, "tariff": 8.0},
+                {"src": "UP", "dst": "WB", "distance_km": 1000, "loss_pct": 0.025, "capacity_mw": 3500, "tariff": 5.0},
+                {"src": "UP", "dst": "KAR", "distance_km": 1600, "loss_pct": 0.035, "capacity_mw": 3500, "tariff": 7.0},
+                {"src": "WB", "dst": "KAR", "distance_km": 1700, "loss_pct": 0.038, "capacity_mw": 3000, "tariff": 6.0},
+            ]
 
         self.edges: Dict[Tuple[str,str], TransmissionEdge] = {}
-        for src, dst, km, loss, cap, tariff in corridors:
+        for item in corridors_cfg:
+            src = str(item["src"])
+            dst = str(item["dst"])
+            km = float(item["distance_km"])
+            loss = float(item["loss_pct"])
+            cap = float(item["capacity_mw"])
+            tariff = float(item["tariff"])
             self.edges[(src, dst)] = TransmissionEdge(src, dst, km, loss, cap, tariff)
             self.edges[(dst, src)] = TransmissionEdge(dst, src, km, loss, cap, tariff)
 
@@ -412,21 +460,13 @@ class GridEnvironment:
         If no override provided, use stochastic generation based on typical profiles.
         Units: MW
         """
-        # typical peak demand fractions of installed capacity
-        base_fractions = {
-            "BHR": 1.10,
-            "UP":  1.05,
-            "WB":  1.15,
-            "KAR": 0.90,
-        }
-
         for nid, node in self.nodes.items():
             if demand_override and nid in demand_override:
                 node.demand_mw = demand_override[nid]
             else:
-                frac  = base_fractions[nid]
-                noise = self.rng.normal(0, 0.05)   # ±5% stochastic noise
-                node.demand_mw = node.generation_mw * max(frac + noise, 0.5)
+                frac = float(self._demand_base_fractions.get(nid, 1.0))
+                noise = self.rng.normal(0, self._demand_noise_std)
+                node.demand_mw = node.generation_mw * max(frac + noise, self._demand_floor_ratio)
 
             node.adjusted_demand_mw = node.demand_mw  # context agent modifies this later
 
