@@ -1,9 +1,25 @@
-"""Configuration, Models, and Cache layer for Intelligence Agent."""
+"""
+Configuration, Models, and Cache layer for Intelligence Agent.
+
+REDESIGNED SYSTEM (2-Tier Architecture):
+=========================================
+TIER 1 (Day 0): ForwardMarketPlanner
+  - Consumes 30-day LightGBM predictions
+  - Calculates Base_Deficit and Base_Surplus for each state
+  - Creates baseline_schedule dictionary
+  - Grid is assumed mathematically balanced
+
+TIER 2 (Daily Loop): DeviationDetector
+  - Fetches daily events from TRUSTED sources only
+  - Calculates Anomaly_Delta_MW (deviation from baseline)
+  - If Anomaly_Delta_MW == 0: Agents stay dormant
+  - If Anomaly_Delta_MW > 0: Wake UnifiedRoutingOrchestrator
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,198 +29,219 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-CITY_PROFILE_TTL_DAYS = 7          # How often to refresh dynamic city intelligence
-NEWS_ARTICLE_LIMIT    = 8          # Max articles per API query
-RSS_ITEM_LIMIT        = 10         # Max items per RSS feed
-HEADLINE_DEDUP_CHARS  = 70         # Characters used for dedup key
-MAX_HEADLINES_TO_LLM  = 80         # Trim before LLM to stay in context budget
-LLM_MODEL             = "gpt-4o-mini"   # Change to "gpt-4o-mini" for lower cost
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
+RSS_ITEM_LIMIT = 15  # Max items per RSS feed
 
+# TRUSTED RSS FEEDS ONLY - Government and official grid sources
+TRUSTED_RSS_FEEDS: Dict[str, str] = {
+    # Official Grid Operators (most reliable)
+    "Grid-India (NLDC)": "https://grid-india.in/feed/",
+    "NRLDC (North Grid)": "https://nrldc.in/feed/",
+    "WRLDC (West Grid)": "https://wrldc.in/feed/",
+    "SRLDC (South Grid)": "https://srldc.in/feed/",
+    "ERLDC (East Grid)": "https://erldc.in/feed/",
+    # Government Press (official announcements)
+    "PIB India": "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
+    # Established Energy News
+    "ET Energy": "https://energy.economictimes.indiatimes.com/rss/topstories",
+}
+
+# State/Node Registry
 CITY_REGISTRY: Dict[str, Dict[str, Any]] = {
     "BHR": {
-        "name"            : "Bihar",
-        "state"           : "Bihar",
-        "lat"             : 25.5941,
-        "lon"             : 85.1376,
-        "typical_peak_mw" : 7000,
-        "primary_discom"  : ["NBPDCL", "SBPDCL"],
-        "climate_zone"    : "Humid subtropical, extreme summer heat",
+        "name": "Bihar",
+        "state": "Bihar",
+        "lat": 25.5941,
+        "lon": 85.1376,
+        "typical_peak_mw": 7000,
+        "primary_discom": ["NBPDCL", "SBPDCL"],
     },
     "UP": {
-        "name"            : "Lucknow",
-        "state"           : "Uttar Pradesh",
-        "lat"             : 26.8467,
-        "lon"             : 80.9462,
-        "typical_peak_mw" : 28000,
-        "primary_discom"  : ["UPPCL", "MVVNL", "PVVNL"],
-        "climate_zone"    : "Humid subtropical, extreme summer + fog winter",
+        "name": "Lucknow",
+        "state": "Uttar Pradesh",
+        "lat": 26.8467,
+        "lon": 80.9462,
+        "typical_peak_mw": 28000,
+        "primary_discom": ["UPPCL", "MVVNL", "PVVNL"],
     },
     "WB": {
-        "name"            : "Kolkata",
-        "state"           : "West Bengal",
-        "lat"             : 22.5726,
-        "lon"             : 88.3639,
-        "typical_peak_mw" : 9500,
-        "primary_discom"  : ["CESC", "WBSEDCL"],
-        "climate_zone"    : "Tropical monsoon, humid subtropical",
+        "name": "Kolkata",
+        "state": "West Bengal",
+        "lat": 22.5726,
+        "lon": 88.3639,
+        "typical_peak_mw": 9500,
+        "primary_discom": ["CESC", "WBSEDCL"],
     },
     "KAR": {
-        "name"            : "Bengaluru",
-        "state"           : "Karnataka",
-        "lat"             : 12.9716,
-        "lon"             : 77.5946,
-        "typical_peak_mw" : 16000,
-        "primary_discom"  : ["BESCOM", "GESCOM"],
-        "climate_zone"    : "Tropical savanna, mild summer, pleasant winters",
+        "name": "Bengaluru",
+        "state": "Karnataka",
+        "lat": 12.9716,
+        "lon": 77.5946,
+        "typical_peak_mw": 16000,
+        "primary_discom": ["BESCOM", "GESCOM"],
     },
 }
 
 
-RSS_FEEDS: Dict[str, str] = {
-    "ToI National"       : "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-    "The Hindu National" : "https://www.thehindu.com/news/national/feeder/default.rss",
-    "ET Energy"          : "https://energy.economictimes.indiatimes.com/rss/topstories",
-    "PIB India"          : "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
-    "Hindu Business"     : "https://www.thehindubusinessline.com/economy/?service=rss",
-    "LiveMint Economy"   : "https://www.livemint.com/rss/economy",
-    "Grid-India (NLDC)"  : "https://grid-india.in/feed/",
-    "NRLDC (North Grid)" : "https://nrldc.in/feed/",
-    "WRLDC (West Grid)"  : "https://wrldc.in/feed/",
-    "SRLDC (South Grid)" : "https://srldc.in/feed/",
-    "ERLDC (East Grid)"  : "https://erldc.in/feed/",
-}
+# ============================================================================
+# TIER 1: BASELINE PLANNING MODELS
+# ============================================================================
+
+@dataclass
+class StateBaseline:
+    """Baseline demand/supply for a single state on a single day."""
+    state_id: str
+    day_index: int
+    date_str: str
+    predicted_demand_mw: float
+    base_supply_mw: float
+    base_deficit_mw: float  # Positive = needs power
+    base_surplus_mw: float  # Positive = can export
 
 
 @dataclass
-class CityIntelligence:
+class BaselineSchedule:
     """
-    Dynamically discovered city-specific knowledge.
-    Generated by LLM from recent news; cached with a TTL.
+    30-day baseline schedule computed from LightGBM predictions.
+    This is the "mathematically balanced" plan before real-world chaos.
     """
-    node_id                : str
-    city_name              : str
-    generated_on           : str           # ISO date string
+    generated_at: str
+    states: List[str]
+    daily_baselines: Dict[str, List[StateBaseline]]  # state_id -> 30 days
+    scheduled_transfers: List[Dict[str, Any]]  # Pre-planned deficit resolution
+    total_deficit_mw: float
+    total_surplus_mw: float
+    is_balanced: bool
 
-    # Discovered by LLM — NOT hardcoded
-    generation_mix         : str           # e.g. "~70% coal, ~20% hydro, ~10% solar"
-    primary_fuel_sources   : List[str]     # e.g. ["WCL Wardha mines", "NTPC Korba imports"]
-    fuel_supply_routes     : List[str]     # e.g. ["Central Railway WCL siding", "Koradi road corridor"]
-    key_vulnerabilities    : List[str]     # e.g. ["Aging Koradi unit 5 prone to forced outage"]
-    seasonal_demand_factors: List[str]     # e.g. ["Cotton ginning Oct-Dec adds ~80 MW rural"]
-    demand_drivers         : List[str]     # e.g. ["IT parks", "steel rolling mills", "pumping irrigation"]
-    neighboring_exchange   : List[str]     # e.g. ["Imports from Chhattisgarh via PGCIL 400kV Wardha"]
-    llm_confidence         : float         # 0.0—1.0 confidence in generated profile
-    sources_used           : List[str]     # News sources that informed this profile
 
-    def is_stale(self, ttl_days: int = CITY_PROFILE_TTL_DAYS) -> bool:
-        generated = date.fromisoformat(self.generated_on)
-        return (date.today() - generated).days >= ttl_days
+# ============================================================================
+# TIER 2: REAL-TIME DEVIATION MODELS
+# ============================================================================
+
+@dataclass
+class ScrapedEvent:
+    """
+    An event scraped from trusted RSS sources.
+    Simple, structured, no LLM hallucination.
+    """
+    source: str              # RSS feed name
+    title: str               # Headline
+    description: str         # Body text (truncated)
+    published_date: str      # ISO date
+    url: str                 # Original link
+    scraped_at: str          # When we fetched it
 
 
 @dataclass
-class DetectedEvent:
-    """A live, dynamically detected large-scale electricity-affecting event."""
-    event_type       : str    # "sports", "political", "cultural", "religious", "trade", "disaster", "other"
-    event_name       : str    # Free text description
-    location         : str    # Venue / area
-    dates            : str    # "2025-03-26 to 2025-03-28" or "2025-03-27"
-    days_away        : int    # Days until event (0 = today/ongoing). HARD MAX = 7.
-    duration_days    : int    # Expected duration
-    grid_mechanism   : str    # "TV_PICKUP" | "HEAVY_INFRA" | "ROUTINE_DISRUPTION" | "MASS_GATHERING"
-    est_attendees    : str    # e.g. "50,000—100,000" or "city-wide" for TV pickup
-    est_mw_impact    : str    # e.g. "+150 to +250 MW additional load"
-    demand_direction : str    # "increase" | "decrease" | "mixed"
-    confidence       : str    # "low" | "medium" | "high"
-    source_headlines : List[str]
-    affected_corridors: List[str]
+class GridAnomaly:
+    """
+    A detected deviation from baseline caused by a real-world event.
+    """
+    event_type: str          # "weather" | "outage" | "demand_spike" | "supply_drop" | "political" | "disaster"
+    description: str         # What happened
+    affected_states: List[str]
+    anomaly_delta_mw: float  # Deviation from baseline (positive = more demand or less supply)
+    confidence: float        # 0.0 to 1.0
+    source_events: List[ScrapedEvent]
+    detected_at: str
 
+
+@dataclass 
+class DailyDeviationResult:
+    """
+    Output of DeviationDetector for a single day.
+    If anomaly_delta_mw == 0, agents stay dormant.
+    """
+    day_index: int
+    date_str: str
+    anomaly_delta_mw: float          # Total deviation across all states
+    state_anomalies: Dict[str, float]  # Per-state deviation
+    detected_anomalies: List[GridAnomaly]
+    should_wake_orchestrator: bool   # True if anomaly_delta_mw > 0
+    message: str                     # Human-readable status
+
+
+# ============================================================================
+# BACKWARD COMPATIBILITY: Keep these for existing imports
+# ============================================================================
 
 class GridEvent(BaseModel):
-    """Phase 1 structured grid event used by downstream deterministic phases."""
-
+    """Structured grid event for downstream phases."""
     event_name: str
     affected_states: List[str] = Field(default_factory=list)
-    demand_multiplier: float = Field(ge=0.0)
-    supply_multiplier: float = Field(ge=0.0)
-    confidence_score: float = Field(ge=0.0, le=1.0)
-
-
-@dataclass
-class WeatherSummary:
-    current_temp_c       : float
-    current_humidity_pct : int
-    current_condition    : str
-    week_max_c           : float
-    week_max_heat_index_c: float
-    week_total_rain_mm   : float
-    forecast_days        : List[Dict[str, Any]]
-    hourly_forecast_7d   : List[Dict[str, Any]]
+    demand_multiplier: float = Field(ge=0.0, default=1.0)
+    supply_multiplier: float = Field(ge=0.0, default=1.0)
+    confidence_score: float = Field(ge=0.0, le=1.0, default=0.5)
 
 
 @dataclass
 class GridMultipliers:
-    pre_event_hoard                : bool
-    temperature_anomaly            : float
-    economic_demand_multiplier     : float
-    generation_capacity_multiplier : float
-    demand_spike_risk              : str   # LOW / MEDIUM / HIGH / CRITICAL
-    supply_shortfall_risk          : str
-    seven_day_demand_forecast_mw_delta: int
-    confidence                     : float
-    key_driver                     : str
-    reasoning                      : str
-    severity_level                 : int
+    """Grid adjustment multipliers (backward compatible)."""
+    pre_event_hoard: bool = False
+    temperature_anomaly: float = 0.0
+    economic_demand_multiplier: float = 1.0
+    generation_capacity_multiplier: float = 1.0
+    demand_spike_risk: str = "LOW"
+    supply_shortfall_risk: str = "LOW"
+    seven_day_demand_forecast_mw_delta: int = 0
+    confidence: float = 0.5
+    key_driver: str = "Baseline"
+    reasoning: str = "No anomalies detected"
+    severity_level: int = 1
 
 
+# ============================================================================
+# CACHE UTILITIES
+# ============================================================================
 
-@dataclass
-class NodeResult:
-    node_id             : str
-    city                : str
-    generated_at        : str
-    weather             : Optional[WeatherSummary]
-    city_intelligence   : Optional[CityIntelligence]
-    phase_1_grid_events : List[GridEvent]
-    detected_events     : List[DetectedEvent]
-    extracted_signals   : str
-    impact_narrative    : str
-    grid_multipliers    : Optional[GridMultipliers]
-    phase_trace         : Optional[Dict[str, Any]] = None
-    error               : Optional[str] = None
-
-
-class CityIntelligenceCache:
+class BaselineCache:
     """
-    Persists CityIntelligence objects to disk with a TTL.
-    Cold boot: LLM generates fresh profile.
-    Warm boot: Load from disk if < CITY_PROFILE_TTL_DAYS old.
+    Persists BaselineSchedule to disk.
+    Recompute only if predictions change or new month starts.
     """
 
     def __init__(self, cache_dir: Path):
         self._dir = cache_dir
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    def _path(self, node_id: str) -> Path:
-        return self._dir / f"city_intel_{node_id}.json"
+    def _path(self) -> Path:
+        return self._dir / "baseline_schedule.json"
 
-    def load(self, node_id: str) -> Optional[CityIntelligence]:
-        p = self._path(node_id)
+    def load(self) -> Optional[BaselineSchedule]:
+        p = self._path()
         if not p.exists():
             return None
         try:
             data = json.loads(p.read_text())
-            ci = CityIntelligence(**data)
-            if ci.is_stale():
-                print(f"    [CACHE] City intel for {node_id} is stale — refreshing.")
-                return None
-            print(f"    [CACHE] Loaded city intel for {node_id} (generated {ci.generated_on})")
-            return ci
+            # Reconstruct StateBaseline objects
+            daily_baselines = {}
+            for state_id, baselines in data.get("daily_baselines", {}).items():
+                daily_baselines[state_id] = [
+                    StateBaseline(**b) for b in baselines
+                ]
+            data["daily_baselines"] = daily_baselines
+            return BaselineSchedule(**data)
         except Exception as exc:
-            print(f"    [!] Cache load failed for {node_id}: {exc}")
+            print(f"[CACHE] Baseline load failed: {exc}")
             return None
 
-    def save(self, ci: CityIntelligence) -> None:
-        p = self._path(ci.node_id)
-        p.write_text(json.dumps(asdict(ci), indent=2))
-        print(f"    [CACHE] Saved city intel for {ci.node_id} — {p}")
+    def save(self, schedule: BaselineSchedule) -> None:
+        p = self._path()
+        # Convert StateBaseline objects to dicts
+        data = {
+            "generated_at": schedule.generated_at,
+            "states": schedule.states,
+            "daily_baselines": {
+                state_id: [asdict(b) for b in baselines]
+                for state_id, baselines in schedule.daily_baselines.items()
+            },
+            "scheduled_transfers": schedule.scheduled_transfers,
+            "total_deficit_mw": schedule.total_deficit_mw,
+            "total_surplus_mw": schedule.total_surplus_mw,
+            "is_balanced": schedule.is_balanced,
+        }
+        p.write_text(json.dumps(data, indent=2))
+        print(f"[CACHE] Saved baseline schedule — {p}")
