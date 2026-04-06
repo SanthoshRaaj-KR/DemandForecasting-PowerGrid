@@ -232,6 +232,92 @@ class IntelligenceOrchestrator:
         result = self.check_day(day_index, baseline, force_scrape=False)
         return result.anomaly_delta_mw
     
+    def export_delta_json(
+        self,
+        day_index: int,
+        baseline: Optional[BaselineSchedule] = None,
+        output_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export Delta calculation as structured JSON.
+        
+        This JSON file is ONLY created when anomalies are detected.
+        If Delta == 0, no file is created (LLMs stay asleep).
+        
+        Parameters
+        ----------
+        day_index : int
+            Day index (0-29)
+        baseline : BaselineSchedule, optional
+            Baseline schedule
+        output_dir : Path, optional
+            Output directory for JSON file
+            
+        Returns
+        -------
+        dict
+            Delta information (empty dict if no anomaly)
+        """
+        from datetime import datetime
+        
+        result = self.check_day(day_index, baseline, force_scrape=False)
+        
+        # If no anomaly, return empty and don't write file
+        if not result.should_wake_orchestrator:
+            return {}
+        
+        # Build delta JSON
+        delta_data = {
+            "generated_at": datetime.now().isoformat(),
+            "day_index": day_index,
+            "date": result.date_str,
+            "anomaly_delta_mw": result.anomaly_delta_mw,
+            "severity": self._get_severity_level(result.anomaly_delta_mw),
+            "should_wake_orchestrator": result.should_wake_orchestrator,
+            "state_anomalies": result.state_anomalies,
+            "detected_events": [
+                {
+                    "event_type": a.event_type,
+                    "affected_states": a.affected_states,
+                    "delta_mw": a.anomaly_delta_mw,
+                    "confidence": a.confidence,
+                    "source": a.source_event.source if a.source_event else "unknown",
+                }
+                for a in result.detected_anomalies
+            ],
+            "message": result.message,
+            "waterfall_trigger": {
+                "step1_temporal_battery": True,
+                "step2_economic_dr": True if result.anomaly_delta_mw > 100 else False,
+                "step3_spatial_routing": True if result.anomaly_delta_mw > 200 else False,
+                "step4_fallback": True if result.anomaly_delta_mw > 500 else False,
+            }
+        }
+        
+        # Write file only if anomaly detected
+        if output_dir:
+            output_path = output_dir / f"delta_{result.date_str}.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            output_path.write_text(json.dumps(delta_data, indent=2), encoding="utf-8")
+            print(f"[IntelligenceOrchestrator] Delta JSON -> {output_path}")
+        
+        return delta_data
+    
+    def _get_severity_level(self, anomaly_mw: float) -> str:
+        """Get severity level from anomaly magnitude."""
+        abs_mw = abs(anomaly_mw)
+        if abs_mw < 50:
+            return "NONE"
+        elif abs_mw < 200:
+            return "LOW"
+        elif abs_mw < 500:
+            return "MEDIUM"
+        elif abs_mw < 1000:
+            return "HIGH"
+        else:
+            return "CRITICAL"
+    
     def get_scheduled_transfers_for_day(
         self,
         day_index: int,

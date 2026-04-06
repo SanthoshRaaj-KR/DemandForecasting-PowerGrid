@@ -227,6 +227,105 @@ class ForwardMarketPlanner:
         """Load baseline from cache if available."""
         return self._cache.load()
     
+    def export_baseline_schedule_json(
+        self,
+        schedule: BaselineSchedule,
+        llm_threshold_mw: float = 50.0,
+    ) -> Dict[str, Any]:
+        """
+        Export baseline schedule as structured JSON with LLM wake/sleep flags.
+        
+        This enables the 2-tier orchestrator to skip expensive LLM agents
+        on predictable baseline days.
+        
+        Parameters
+        ----------
+        schedule : BaselineSchedule
+            The computed baseline schedule.
+        llm_threshold_mw : float
+            If any state has |net_position| > threshold, LLMs are needed.
+            Default 50 MW.
+            
+        Returns
+        -------
+        dict
+            JSON-serializable schedule with daily LLM flags.
+        """
+        from datetime import datetime
+        
+        daily_schedule = []
+        
+        # Get simulation days from first state's baselines
+        first_state = list(schedule.daily_baselines.keys())[0]
+        num_days = len(schedule.daily_baselines[first_state])
+        
+        llm_wake_days = 0
+        
+        for day_idx in range(num_days):
+            day_baselines = self.get_baseline_for_day(schedule, day_idx)
+            
+            # Calculate national net position and determine LLM need
+            states_data = {}
+            max_abs_net = 0.0
+            
+            for state_id, baseline in day_baselines.items():
+                net_mw = baseline.base_supply_mw - baseline.predicted_demand_mw
+                abs_net = abs(net_mw)
+                
+                states_data[state_id] = {
+                    "predicted_demand_mw": round(baseline.predicted_demand_mw, 2),
+                    "predicted_supply_mw": round(baseline.base_supply_mw, 2),
+                    "net_position_mw": round(net_mw, 2),
+                    "deficit": net_mw < 0,
+                    "surplus": net_mw > 0,
+                }
+                
+                max_abs_net = max(max_abs_net, abs_net)
+            
+            # National totals
+            national_demand = sum(s["predicted_demand_mw"] for s in states_data.values())
+            national_supply = sum(s["predicted_supply_mw"] for s in states_data.values())
+            national_net = national_supply - national_demand
+            
+            # LLM decision: wake if ANY state has significant imbalance
+            llm_agents_enabled = max_abs_net > llm_threshold_mw
+            
+            if llm_agents_enabled:
+                llm_wake_days += 1
+            
+            # Get scheduled transfers for this day
+            day_transfers = self.get_scheduled_transfers_for_day(schedule, day_idx)
+            
+            day_entry = {
+                "date": list(day_baselines.values())[0].date_str if day_baselines else "",
+                "day_index": day_idx,
+                "states": states_data,
+                "national_demand_mw": round(national_demand, 2),
+                "national_supply_mw": round(national_supply, 2),
+                "national_net_mw": round(national_net, 2),
+                "max_state_imbalance_mw": round(max_abs_net, 2),
+                "llm_agents_enabled": llm_agents_enabled,
+                "baseline_transfers_count": len(day_transfers),
+                "confidence": 0.85,  # Placeholder for ML model confidence
+            }
+            
+            daily_schedule.append(day_entry)
+        
+        return {
+            "generated_at": datetime.now().isoformat(),
+            "start_date": schedule.generated_at,
+            "days": num_days,
+            "states": schedule.states,
+            "llm_threshold_mw": llm_threshold_mw,
+            "llm_wake_days": llm_wake_days,
+            "llm_sleep_days": num_days - llm_wake_days,
+            "cost_reduction_pct": round((num_days - llm_wake_days) / num_days * 100, 1),
+            "total_deficit_mw": schedule.total_deficit_mw,
+            "total_surplus_mw": schedule.total_surplus_mw,
+            "is_balanced": schedule.is_balanced,
+            "schedule": daily_schedule,
+        }
+    
     @staticmethod
     def print_baseline_summary(schedule: BaselineSchedule) -> None:
         """Print human-readable summary of baseline schedule."""
