@@ -1,7 +1,7 @@
 # Agent Architecture Registry
 
 **Last Updated:** 2026-04-06  
-**Total Agents:** 32 active components  
+**Total Agents:** 35 active components (+3 new patent features)  
 **Redundancy Found:** None  
 **Status:** Production-ready
 
@@ -11,7 +11,11 @@
 
 The Smart Grid backend implements a **clean 4-stage multi-agent system** with deterministic core logic and selective LLM use. All agents serve distinct purposes with zero redundancy.
 
-**Key Innovation:** Python-based sliding window memory (72-hour) enables autonomous learning without vector databases.
+**Key Innovations:**
+- Python-based sliding window memory (72-hour) enables autonomous learning without vector databases
+- Lifeboat Protocol for autonomous graph-cut islanding
+- DR Bounty Auctions for game-theoretic demand response
+- LLM Parameter Autopsy for self-healing hyperparameters
 
 ---
 
@@ -57,6 +61,8 @@ The Smart Grid backend implements a **clean 4-stage multi-agent system** with de
 | Phase5IncidentDispatcher | `routing_agent/phase5_incident_dispatcher.py` | Thermal derating of transmission lines | Primary |
 | Phase6NegotiationAgent | `routing_agent/phase6_negotiation_agent.py` | Deterministic spatial routing (BFS-style) | Primary |
 | Phase7SyndicateAgent | `routing_agent/phase7_syndicate_agent.py` | Trade execution + frequency safety (49.5 Hz) | Primary |
+| **LifeboatProtocol** | `routing_agent/lifeboat_protocol.py` | **PATENT #2: Autonomous Graph-Cut Islanding** | **Primary** |
+| **DRBountyAuction** | `routing_agent/dr_bounty_auction.py` | **FEATURE #4: Game-Theoretic Micro-Auctions** | **Primary** |
 | DispatcherAgent | `routing_agent/dispatcher.py` | Topology and DLR enforcement | Support |
 | DLRCalculator | `routing_agent/dlr_calculator.py` | Dynamic Line Rating (2% per °C) | Support |
 | PathClimateAgent | `routing_agent/path_climate_agent.py` | Climate impact on transmission paths | Support |
@@ -64,15 +70,14 @@ The Smart Grid backend implements a **clean 4-stage multi-agent system** with de
 | DispatchWindowAgent | `routing_agent/dispatch_window_agent.py` | Temporal dispatch coordination | Support |
 | CarbonTariff | `routing_agent/carbon_tariff.py` | Carbon tax calculation | Support |
 | SyndicateDecider | `routing_agent/syndicate_decider.py` | Load shedding decision logic | Support |
-| Negotiator | `routing_agent/negotiator.py` | LLM-based price haggling (when bid < ask) | Support |
 | HourlyFusionAgent | `fusion_agent/hourly_fusion_agent.py` | Hourly demand/supply fusion | Support |
 | ReserveActivationAgent | `fusion_agent/reserve_activation_agent.py` | Minimum dispatchable reserve enforcement | Support |
 
 **Waterfall Sequence:**
 1. **Temporal:** Drain state batteries first
-2. **Economic:** Activate DR bounties (Phase3)
+2. **Economic:** Activate DR bounties (Phase3) → **Now with Micro-Auctions**
 3. **Spatial:** Route via transmission (Phase6→Phase7)
-4. **Fallback:** Frequency check → load shedding if f < 49.5 Hz
+4. **Fallback:** Frequency check → load shedding OR **Lifeboat Protocol** if f < 49.5 Hz
 
 ---
 
@@ -83,6 +88,7 @@ The Smart Grid backend implements a **clean 4-stage multi-agent system** with de
 | Phase8XAIAgent | `routing_agent/phase8_xai_agent.py` | KPI aggregation and metrics | Primary |
 | SyndicateXAI | `routing_agent/syndicate_xai.py` | LLM-generated narrative for dispatches | Primary |
 | SettlementAgent | `routing_agent/settlement.py` | Daily ledger persistence (state_capacities.json) | Primary |
+| **LLMParameterAutopsy** | `fusion_agent/llm_parameter_autopsy.py` | **PATENT #1: Agentic Recursive Hyperparameter Optimization** | **Primary** |
 | Memory Buffer | `unified_routing_orchestrator.grid_short_term_memory` | 3-day sliding window (max 3 warnings) | Support |
 
 **Memory System:**
@@ -90,6 +96,22 @@ The Smart Grid backend implements a **clean 4-stage multi-agent system** with de
 - **Read:** Injected into Phase6 prompts to avoid repeated bottlenecks
 - **Format:** Plain text warnings (e.g., "Bihar-UP line hit thermal cap yesterday")
 - **Innovation:** No vector DB, no embeddings - pure Python list
+
+**Monthly Autopsy (Patent #1):**
+- **Input:** 30 days of XAI Phase Traces + memory warnings
+- **Process:** Chain-of-thought reasoning about failure patterns
+- **Output:** JSON with hyperparameter recommendations
+- **Innovation:** Self-learning WITHOUT neural networks
+
+---
+
+## Patent Features Summary
+
+| # | Feature | File | Patent Buzzword |
+|---|---------|------|-----------------|
+| 1 | LLM Parameter Autopsy | `fusion_agent/llm_parameter_autopsy.py` | Agentic Recursive Hyperparameter Optimization |
+| 2 | Lifeboat Protocol | `routing_agent/lifeboat_protocol.py` | Autonomous Topology Severance via Capacity-Constrained Graph Partitioning |
+| 4 | DR Bounty Auctions | `routing_agent/dr_bounty_auction.py` | Game-Theoretic Demand Response Micro-Auctions |
 
 ---
 
@@ -100,8 +122,16 @@ The Smart Grid backend implements a **clean 4-stage multi-agent system** with de
 | Shared Models | `shared/models.py` | Core data classes (Order, DispatchRecord, etc.) |
 | Constants | `shared/constants.py` | All tunable parameters centralized |
 | ProsumerAgents | `state_agent/prosumer_agent.py` | DR bidders (EV, Industrial, Residential) |
-| Dummy Context | `dummy_context.py` | Test fixture for offline simulations |
 | LLM Safety Stub | `routing_agent/llm_safety_stub.py` | Placeholder safety checker (90% approval) |
+
+---
+
+## Files Safe to Remove
+
+| File | Reason |
+|------|--------|
+| `routing_agent/negotiator.py` | Never called anywhere |
+| `dummy_context.py` | Zero imports in codebase |
 
 ---
 

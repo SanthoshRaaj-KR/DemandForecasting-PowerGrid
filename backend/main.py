@@ -258,17 +258,164 @@ def validate_routes():
         return {}
 
 
+def demo_lifeboat_protocol(day_index: int = 0, date_str: str = "2025-01-01") -> dict:
+    """
+    Demonstrate the Lifeboat Protocol (Patent Feature #2).
+    
+    Simulates a scenario where one state is in severe crisis and
+    importing power would destabilize the entire grid.
+    """
+    from src.agents.routing_agent.lifeboat_protocol import LifeboatProtocol, GridState
+    
+    print("\n" + "=" * 70)
+    print("PATENT FEATURE #2: LIFEBOAT PROTOCOL")
+    print("Autonomous Topology Severance via Capacity-Constrained Graph Partitioning")
+    print("=" * 70)
+    
+    # Create crisis scenario: UP has massive deficit
+    grid = GridState(
+        states=["UP", "Bihar", "WB", "Karnataka"],
+        edges={
+            ("WB", "Bihar"): 100.0,
+            ("Bihar", "UP"): 80.0,
+            ("Bihar", "WB"): 100.0,
+            ("UP", "Bihar"): 80.0,
+            ("Karnataka", "WB"): 70.0,
+            ("WB", "Karnataka"): 70.0,
+        },
+        deficits={
+            "UP": 350.0,  # Massive crisis in UP
+            "Bihar": 50.0,
+        },
+        surpluses={
+            "WB": 80.0,
+            "Karnataka": 60.0,
+        },
+        total_capacity_mw=2000.0,
+    )
+    
+    protocol = LifeboatProtocol()
+    decision = protocol.evaluate(grid, day_index=day_index)
+    
+    # Export decision
+    if decision.should_island:
+        protocol.export_decision_json(decision, day_index, date_str)
+    
+    return {
+        "should_island": decision.should_island,
+        "sacrificed": decision.sacrificed_states,
+        "protected": decision.protected_states,
+        "frequency_before": decision.frequency_before_hz,
+        "frequency_after": decision.frequency_after_island_hz,
+    }
+
+
+def demo_dr_bounty_auction(deficits: dict = None, date_str: str = "2025-01-01") -> dict:
+    """
+    Demonstrate DR Bounty Micro-Auctions (Feature #4).
+    
+    Runs a reverse auction where prosumers bid to curtail load.
+    """
+    from src.agents.routing_agent.dr_bounty_auction import DRBountyAuction
+    
+    print("\n" + "=" * 70)
+    print("FEATURE #4: DR BOUNTY MICRO-AUCTIONS")
+    print("Game-Theoretic Demand Response via Reverse Second-Price Auctions")
+    print("=" * 70)
+    
+    if deficits is None:
+        deficits = {
+            "UP": 120.0,
+            "Bihar": 45.0,
+        }
+    
+    auction = DRBountyAuction()
+    round_result = auction.run_auction_round(
+        deficits_by_state=deficits,
+        round_id=f"round_{date_str}",
+        timestamp=date_str,
+    )
+    
+    # Export results
+    auction.export_auction_results(round_result)
+    
+    return {
+        "total_resolved_mw": round_result.total_deficit_resolved_mw,
+        "total_cost_inr": round_result.total_cost_inr,
+        "avg_clearing_price": round_result.average_clearing_price_inr,
+        "states_auctioned": list(round_result.state_results.keys()),
+    }
+
+
+def demo_parameter_autopsy(month_str: str = "2025-01") -> dict:
+    """
+    Demonstrate LLM Parameter Autopsy (Patent Feature #1).
+    
+    Runs end-of-month analysis and generates hyperparameter recommendations.
+    """
+    from src.agents.fusion_agent.llm_parameter_autopsy import LLMParameterAutopsy
+    
+    print("\n" + "=" * 70)
+    print("PATENT FEATURE #1: LLM PARAMETER AUTOPSY")
+    print("Agentic Recursive Hyperparameter Optimization (No Neural Networks)")
+    print("=" * 70)
+    
+    autopsy = LLMParameterAutopsy()
+    
+    # Simulate a month of data with some failures
+    daily_summaries = [
+        {"load_shedding_mw": 0, "dr_resolved_mw": 30, "total_deficit_mw": 100} for _ in range(20)
+    ] + [
+        {"load_shedding_mw": 45, "dr_resolved_mw": 10, "total_deficit_mw": 150} for _ in range(5)
+    ] + [
+        {"load_shedding_mw": 80, "dr_resolved_mw": 5, "total_deficit_mw": 200} for _ in range(5)
+    ]
+    
+    # Sample memory warnings
+    memory_warnings = [
+        "THERMAL_BOTTLENECK: Bihar-UP line at 95% capacity",
+        "BATTERY_DEPLETED: UP battery SOC at 5 MW",
+        "THERMAL_BOTTLENECK: WB-Bihar edge congested",
+    ]
+    
+    # Run autopsy
+    report = autopsy.analyze_month(
+        month_str=month_str,
+        daily_summaries=daily_summaries,
+        xai_traces=[],  # Simplified for demo
+        memory_warnings=memory_warnings,
+    )
+    
+    # Export report
+    autopsy.export_autopsy_json(report)
+    
+    return {
+        "month": report.month,
+        "failure_rate_pct": report.failure_rate_pct,
+        "patterns_detected": len(report.detected_patterns),
+        "param_changes_recommended": len(report.recommended_changes),
+        "json_path": report.json_output_path,
+    }
+
+
 def main() -> None:
     """
-    4-STAGE WORKFLOW:
+    4-STAGE WORKFLOW + 3 PATENT FEATURES:
+    
+    Stages:
     1. A Priori Planner: Generate 30-day baseline schedule
     2. Intelligence: Daily anomaly detection  
     3. Routing: Waterfall orchestration (Battery→DR→BFS→Fallback)
     4. XAI/Memory: Phase Trace export and memory learning
+    
+    Patent Features:
+    - Lifeboat Protocol: Autonomous Graph-Cut Islanding
+    - DR Bounty Auctions: Game-Theoretic Micro-Auctions
+    - LLM Parameter Autopsy: Self-Healing Hyperparameters
     """
     print("\n" + "🔌" * 35)
     print(" " * 15 + "SMART GRID SIMULATION")
-    print(" " * 12 + "Multi-Agent Workflow (Stages 1-4)")
+    print(" " * 10 + "Multi-Agent Workflow + Patent Features")
     print("🔌" * 35 + "\n")
     
     # STAGE 1: A Priori Planning
@@ -278,8 +425,17 @@ def main() -> None:
     print("\nSTAGE 2: Intelligence extraction...")
     intelligence = generate_intelligence()
     
-    # STAGE 3: Waterfall Orchestration (demo with sample scenario)
+    # STAGE 3: Waterfall Orchestration
     waterfall = execute_waterfall_demo(day_index=0, date_str="2025-01-01")
+    
+    # PATENT FEATURE #2: Lifeboat Protocol
+    lifeboat = demo_lifeboat_protocol(day_index=0, date_str="2025-01-01")
+    
+    # FEATURE #4: DR Bounty Auctions
+    dr_auction = demo_dr_bounty_auction(date_str="2025-01-01")
+    
+    # PATENT FEATURE #1: LLM Parameter Autopsy
+    autopsy = demo_parameter_autopsy(month_str="2025-01")
     
     # STAGE 4: Run full simulation (includes XAI/Memory)
     print("\nSTAGE 4: Running full simulation...")
@@ -289,11 +445,23 @@ def main() -> None:
     print("\n" + "=" * 70)
     print("WORKFLOW COMPLETE ✓")
     print("=" * 70)
-    print(f"STAGE 1 - Baseline: {baseline['days']} days, {baseline['cost_reduction_pct']:.1f}% LLM cost reduction")
-    print(f"STAGE 2 - Intelligence: {len(intelligence)} state analyses")
-    print(f"STAGE 3 - Waterfall: {waterfall['total_resolved_mw']:.0f} MW resolved, {waterfall['load_shedding_mw']:.0f} MW shed")
-    print(f"STAGE 4 - XAI Trace: {waterfall['xai_trace_path']}")
-    print(f"Route validation: {list(route_check.keys())}")
+    print(f"\n📊 STAGE RESULTS:")
+    print(f"  STAGE 1 - Baseline: {baseline['days']} days, {baseline['cost_reduction_pct']:.1f}% LLM cost reduction")
+    print(f"  STAGE 2 - Intelligence: {len(intelligence)} state analyses")
+    print(f"  STAGE 3 - Waterfall: {waterfall['total_resolved_mw']:.0f} MW resolved, {waterfall['load_shedding_mw']:.0f} MW shed")
+    print(f"  STAGE 4 - XAI Trace: {waterfall['xai_trace_path']}")
+    
+    print(f"\n🏆 PATENT FEATURES:")
+    print(f"  [P1] LLM Autopsy: {autopsy['patterns_detected']} patterns, {autopsy['param_changes_recommended']} recommendations")
+    print(f"  [P2] Lifeboat: Island={'YES' if lifeboat['should_island'] else 'NO'}, Protected={lifeboat['protected']}")
+    print(f"  [F4] DR Auction: {dr_auction['total_resolved_mw']:.0f} MW @ ₹{dr_auction['avg_clearing_price']:.2f}/MW")
+    
+    print(f"\n📁 OUTPUT FILES:")
+    print(f"  - outputs/baseline_schedule_*.json")
+    print(f"  - outputs/xai_phase_trace_*.json")
+    print(f"  - outputs/lifeboat_decision_*.json")
+    print(f"  - outputs/dr_auction_*.json")
+    print(f"  - outputs/parameter_autopsy_*.json")
     print("=" * 70 + "\n")
 
 
