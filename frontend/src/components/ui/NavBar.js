@@ -1,14 +1,16 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Activity, Brain, Zap, GitBranch, Workflow, TrendingUp } from 'lucide-react'
+import { Activity, Brain, Coins, GitBranch, Layers, TrendingUp, Workflow, Zap } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/',             label: 'Dashboard',    icon: Activity },
+  { href: '/stages',       label: 'Stages',       icon: Layers },
   { href: '/pipeline',     label: 'Pipeline',     icon: Workflow },
   { href: '/forecast',     label: 'Forecast',     icon: TrendingUp },
   { href: '/intelligence', label: 'Intelligence', icon: Brain },
   { href: '/simulation',   label: 'War Room',     icon: Zap },
+  { href: '/costs',        label: 'Costs',        icon: Coins },
 ]
 
 export function NavBar() {

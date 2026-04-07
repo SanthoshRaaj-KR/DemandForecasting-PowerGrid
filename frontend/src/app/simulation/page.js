@@ -1,12 +1,12 @@
 'use client'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Zap, Network, BarChart2, MessageSquare, AlertTriangle, CheckCircle, Brain, RefreshCw } from 'lucide-react'
 import { useSimulation, useGridStatus } from '@/hooks/useApi'
 import { usePipeline, STAGES } from '@/hooks/usePipeline'
 import { PipelineStatusBar } from '@/components/ui/PipelineExplainer'
 import { SimTerminal } from '@/components/grid/SimTerminal'
 import { AgentChat } from '@/components/agents/AgentChat'
-import { XAIAuditPanel } from '@/components/agents/XAIAuditPanel'
+import XAIDashboard from '@/components/XAIDashboard'
 import { GridMap } from '@/components/grid/GridMap'
 import { DispatchTable } from '@/components/grid/DispatchTable'
 import { DispatcherRadar } from '@/components/grid/DispatcherRadar'
@@ -21,10 +21,85 @@ const TABS = [
   { id: 'xai', label: 'XAI Ledger', icon: Brain },
 ]
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+function toTextArray(value) {
+  if (Array.isArray(value)) return value.map(String)
+  if (typeof value === 'string' && value.trim()) return [value]
+  return []
+}
+
+function transformXAIPayload(raw) {
+  if (!raw) return null
+
+  // If backend already returns 3-panel format, keep it.
+  if (raw.panel_data?.now && raw.panel_data?.predicted && raw.panel_data?.risk_watch) {
+    return {
+      plain_summary: raw.plain_summary || 'Grid intelligence summary available.',
+      technical_details: raw.technical_details || JSON.stringify(raw, null, 2),
+      panel_data: raw.panel_data,
+      computed_at: raw.computed_at || new Date().toISOString(),
+    }
+  }
+
+  const stage = raw.stage || {}
+  const rec = raw.recommendation || {}
+  const impacts = raw.estimated_impact || {}
+  const delta = Number(raw.anomaly_delta_mw || 0)
+  const wake = Boolean(raw.wake_decision)
+  const confidence = typeof raw.confidence === 'number' ? raw.confidence : null
+
+  return {
+    plain_summary:
+      raw.plain_summary ||
+      `Decision: ${wake ? 'WAKE' : 'SLEEP'}. Delta ${delta.toFixed(1)} MW. ${
+        wake ? 'Full orchestration activated.' : 'Baseline mode retained.'
+      }`,
+    technical_details: JSON.stringify(raw, null, 2),
+    panel_data: {
+      now: {
+        title: 'NOW',
+        icon: 'N',
+        headline: `Current stage: ${stage.name || 'Unknown'} (${stage.id || 'n/a'})`,
+        bullet_points: [
+          `Wake decision: ${wake ? 'WAKE' : 'SLEEP'}`,
+          `Delta: ${delta.toFixed(1)} MW`,
+          `Confidence: ${confidence !== null ? confidence.toFixed(2) : 'n/a'}`,
+        ],
+        severity: wake ? 'warning' : 'info',
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      },
+      predicted: {
+        title: 'PREDICTED',
+        icon: 'P',
+        headline: rec.summary || 'No forecast recommendation available.',
+        bullet_points: toTextArray(rec.actions).slice(0, 4),
+        severity: wake ? 'warning' : 'info',
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      },
+      risk_watch: {
+        title: 'RISK WATCH',
+        icon: 'R',
+        headline: wake ? 'Active anomaly handling in progress.' : 'No critical anomaly detected.',
+        bullet_points: [
+          `Demand impact: ${Number(impacts.demand_mw || 0).toFixed(1)} MW`,
+          `Supply impact: ${Number(impacts.supply_mw || 0).toFixed(1)} MW`,
+          `Market impact index: ${Number(impacts.market_index || 0).toFixed(2)}`,
+        ],
+        severity: wake ? 'critical' : 'info',
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      },
+    },
+    computed_at: raw.generated_at || new Date().toISOString(),
+  }
+}
+
 export default function SimulationPage() {
   const { logs, results, running, done, runSimulation } = useSimulation()
   const { data: gridStatus } = useGridStatus()
   const { data: costSavings } = useCostSavings()
+  const [xaiData, setXaiData] = useState(null)
+  const [xaiLoading, setXaiLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('terminal')
   
   // Pipeline integration
@@ -46,6 +121,47 @@ export default function SimulationPage() {
   
   // Check if simulation should be blocked
   const canRunSimulation = pipelineReady && hasIntelligence
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadXAI = async () => {
+      try {
+        setXaiLoading(true)
+        const res = await fetch(`${API_URL}/api/xai-audit-ledger`, { cache: 'no-store' })
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+        const json = await res.json()
+        if (!cancelled) {
+          setXaiData(transformXAIPayload(json))
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setXaiData(
+            transformXAIPayload({
+              plain_summary: 'XAI ledger is not available yet. Run simulation to generate it.',
+              stage: { id: 0, name: 'Not Available' },
+              recommendation: { summary: 'No recommendation available.', actions: [] },
+              estimated_impact: { demand_mw: 0, supply_mw: 0, market_index: 0 },
+              anomaly_delta_mw: 0,
+              wake_decision: false,
+              generated_at: new Date().toISOString(),
+            }),
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setXaiLoading(false)
+        }
+      }
+    }
+
+    loadXAI()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <div className="pt-14">
@@ -339,9 +455,7 @@ export default function SimulationPage() {
         {activeTab === 'xai' && (
           <div className="space-y-4">
             <SectionLabel>7-Phase XAI Daily Ledger</SectionLabel>
-            <Card>
-              <XAIAuditPanel regionId="GRID" />
-            </Card>
+            <XAIDashboard data={xaiData} loading={xaiLoading} />
           </div>
         )}
       </div>

@@ -24,6 +24,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 from src.environment.grid_physics import GridEnvironment
 from src.agents.intelligence_agent.orchestrator import SmartGridIntelligenceAgent
 from src.agents.intelligence_agent.setup import CITY_REGISTRY
+from src.orchestration.cost_tracker import CostTracker
 
 app = FastAPI(title="Grid Twin API", version="1.0.0")
 
@@ -41,6 +42,7 @@ OUTPUTS_DIR_CANDIDATES = [
 CACHE_DIR_CANDIDATES = [d / "context_cache" for d in OUTPUTS_DIR_CANDIDATES]
 PRIMARY_OUTPUTS_DIR = OUTPUTS_DIR_CANDIDATES[0]
 PRIMARY_CACHE_DIR = CACHE_DIR_CANDIDATES[0]
+cost_tracker = CostTracker(output_dir=PRIMARY_OUTPUTS_DIR)
 
 
 def _ensure_cache_dir() -> None:
@@ -94,9 +96,6 @@ def _load_node_cache() -> Dict[str, Dict]:
 
 
 def _latest_simulation_file() -> Path | None:
-    if day_index is not None and day_index < 0:
-        raise HTTPException(status_code=400, detail="day_index must be >= 0")
-
     files: List[Path] = []
     for outputs_dir in OUTPUTS_DIR_CANDIDATES:
         if outputs_dir.exists():
@@ -469,6 +468,43 @@ def cost_savings():
             "llm_cost_total": round(llm_cost, 4),
             "estimated_savings_total": round(savings, 4),
             "estimated_savings_pct": round(savings_pct, 2),
+        },
+    }
+
+
+@app.get("/api/cost-tracking")
+async def get_cost_tracking():
+    """
+    Get complete cost tracking data with daily breakdown and summary.
+    """
+    try:
+        summary = cost_tracker.get_summary()
+        return {
+            "status": "success",
+            "data": summary,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "data": {"total_days": 0, "daily_metrics": []},
+        }
+
+
+@app.get("/api/orchestration-status")
+async def get_orchestration_status():
+    """
+    Get current orchestration engine status.
+    """
+    return {
+        "status": "success",
+        "data": {
+            "engine_state": "IDLE",
+            "last_run_date": None,
+            "config": {
+                "delta_wake_threshold_mw": 50.0,
+                "llm_cost_per_call_inr": 2.0,
+            },
         },
     }
 
