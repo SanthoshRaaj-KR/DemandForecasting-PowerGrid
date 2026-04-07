@@ -56,9 +56,9 @@ class EventScraper:
     - No external API keys required
     """
     
-    # Keywords for grid-relevant events
+    # Keywords for grid-relevant events (expanded for economic/political coverage)
     GRID_KEYWORDS = [
-        # Power/Grid
+        # Power/Grid (existing)
         "power", "electricity", "grid", "load", "demand", "supply",
         "generation", "transmission", "outage", "blackout", "tripping",
         "frequency", "voltage", "mw", "gw", "megawatt", "gigawatt",
@@ -71,7 +71,31 @@ class EventScraper:
         # Events that affect demand
         "heatwave", "coldwave", "monsoon", "cyclone", "flood",
         "festival", "election", "holiday", "industrial",
+        # Economic keywords (NEW)
+        "lng", "price", "tariff", "rate hike",
+        "import", "export", "auction", "bidding", "spot price", "futures",
+        "inflation", "forex", "rupee", "dollar",
+        # Political/Social keywords (NEW)
+        "strike", "protest", "bandh", "minister", "policy",
+        "tender", "contract", "privatization", "subsidy", "reform",
+        "dispute", "curfew", "emergency",
     ]
+    
+    # Economic event classification keywords
+    ECONOMIC_KEYWORDS = {
+        "coal_shortage": ["coal shortage", "coal crisis", "coal stock", "pit-head stock"],
+        "fuel_price": ["lng price", "gas price", "fuel cost", "oil price", "crude"],
+        "tariff_change": ["tariff hike", "rate revision", "price increase", "electricity bill"],
+        "market_event": ["auction", "day-ahead market", "spot price", "power exchange"],
+    }
+    
+    # Political event classification keywords
+    POLITICAL_KEYWORDS = {
+        "strike": ["strike", "bandh", "hartal", "work stoppage", "labor protest"],
+        "policy_change": ["policy", "regulation", "ministry", "cabinet", "amendment"],
+        "election_impact": ["election", "polling", "campaigning", "voting"],
+        "civil_unrest": ["protest", "agitation", "demonstration", "riot"],
+    }
     
     # State name variations for detection
     STATE_ALIASES = {
@@ -244,9 +268,20 @@ class EventScraper:
         return affected
     
     def classify_event_type(self, event: ScrapedEvent) -> str:
-        """Classify event into category."""
+        """Classify event into categories: economic_*, political_*, outage, weather, supply_drop, demand_spike, etc."""
         text = (event.title + " " + event.description).lower()
         
+        # Check economic keywords first (more specific)
+        for event_type, keywords in self.ECONOMIC_KEYWORDS.items():
+            if any(kw in text for kw in keywords):
+                return f"economic_{event_type}"
+        
+        # Check political keywords
+        for event_type, keywords in self.POLITICAL_KEYWORDS.items():
+            if any(kw in text for kw in keywords):
+                return f"political_{event_type}"
+        
+        # Existing classification logic for grid/weather events
         if any(kw in text for kw in ["outage", "tripping", "failure", "blackout", "shutdown"]):
             return "outage"
         elif any(kw in text for kw in ["heatwave", "coldwave", "cyclone", "flood", "monsoon"]):
@@ -255,8 +290,6 @@ class EventScraper:
             return "supply_drop"
         elif any(kw in text for kw in ["demand", "peak", "record", "surge"]):
             return "demand_spike"
-        elif any(kw in text for kw in ["election", "festival", "holiday", "bandh"]):
-            return "political"
         elif any(kw in text for kw in ["commissioning", "new", "capacity", "addition"]):
             return "capacity_addition"
         else:

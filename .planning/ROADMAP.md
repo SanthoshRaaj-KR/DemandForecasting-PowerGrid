@@ -118,6 +118,23 @@ Plans:
 
 ---
 
+### Phase 15: White Routing, A+ Event Fetching & XAI UI Rephrasing
+**Goal:** Implement risk-aware predictive path selection, comprehensive news/event scraping, and human-readable XAI output  
+**Requirements:** REQ-041, REQ-042, REQ-043, REQ-044  
+**Plans:** 3 plans
+
+**Features:**
+1. **White Routing Logic** — Risk-aware path selection in Phase 6 that queries IntelligenceAgent for "Stimulus Flags" (storms, outages) on transit nodes before locking routes. Prevents mid-transit failures by choosing safer alternate corridors.
+2. **A+ Grade Event Fetching** — Comprehensive scraping of economic events, climatic disruptions, policy changes, and grid incidents per state/city. Sources: Grid-India, NLDC, PIB, IMD Weather, RBI/Economic feeds.
+3. **XAI UI Rephrasing** — Transform raw XAI traces into command-center-readable narratives ("What's happening", "What's predicted", "What might happen") for operators and regulators.
+
+Plans:
+- [ ] 15-01-PLAN.md — White Routing: Stimulus Radar + risk-weighted path selection
+- [ ] 15-02-PLAN.md — A+ Event Fetching: Multi-source scraper with per-state impact estimation
+- [ ] 15-03-PLAN.md — XAI Rephrasing: Human-readable narrative generator for UI
+
+---
+
 ## Program Success Criteria
 
 - ✅ 4-stage backend loop operational with conditional LLM wake-up  

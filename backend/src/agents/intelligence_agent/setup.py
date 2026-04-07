@@ -45,8 +45,19 @@ TRUSTED_RSS_FEEDS: Dict[str, str] = {
     "ERLDC (East Grid)": "https://erldc.in/feed/",
     # Government Press (official announcements)
     "PIB India": "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
+    "CEA (Central Electricity Authority)": "https://cea.nic.in/rss_feed/",
     # Established Energy News
     "ET Energy": "https://energy.economictimes.indiatimes.com/rss/topstories",
+    # Economic / Energy Market (NEW)
+    "Moneycontrol Energy": "https://www.moneycontrol.com/rss/energy.xml",
+    "LiveMint Energy": "https://www.livemint.com/rss/energy",
+    "Business Standard Power": "https://www.business-standard.com/rss/power-102.rss",
+    # Coal / Fuel (NEW)
+    "Coal India": "https://www.coal.gov.in/rss",
+    # Political / General India News (NEW)
+    "TOI India News": "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
+    "HT India News": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
+    "NDTV India": "https://www.ndtv.com/rss/india",
 }
 
 # State/Node Registry

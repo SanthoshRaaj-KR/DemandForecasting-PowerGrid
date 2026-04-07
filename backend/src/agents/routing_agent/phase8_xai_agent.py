@@ -9,12 +9,22 @@ At the end of each day, this agent analyzes failures and generates:
 3. Diagnostic insights for the Recursive LLM Parameter Autopsy
 
 This enables Agentic Learning WITHOUT Neural Networks.
+
+HUMAN-READABLE DASHBOARD (Plan 15-03)
+=====================================
+Now includes 3-panel dashboard output for executive/regulator audience:
+- NOW: Current grid state, active trades, lifeboat status
+- PREDICTED: Forecasted deficits/surpluses
+- RISK WATCH: Active stimulus flags and risks
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from ..shared.xai_templates import XAITemplateEngine, XAIOutput, PanelData
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,39 @@ class Phase8Summary:
     summary_line: str
     memory_warning: Optional[str] = None
     self_healing_insights: Optional[Dict[str, str]] = None
+
+
+@dataclass
+class TickSummary:
+    """XAI summary for a single simulation tick with human-readable output."""
+    tick: int
+    timestamp: str
+    frequency_hz: float
+    total_traded_mw: float
+    deficit_states: List[str]
+    surplus_states: List[str]
+    lifeboat_active: bool
+    raw_summary: str
+    
+    # Human-readable output for 3-panel dashboard
+    plain_summary: str = ""
+    technical_details: str = ""
+    panel_data: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tick": self.tick,
+            "timestamp": self.timestamp,
+            "frequency_hz": self.frequency_hz,
+            "total_traded_mw": self.total_traded_mw,
+            "deficit_states": self.deficit_states,
+            "surplus_states": self.surplus_states,
+            "lifeboat_active": self.lifeboat_active,
+            "raw_summary": self.raw_summary,
+            "plain_summary": self.plain_summary,
+            "technical_details": self.technical_details,
+            "panel_data": self.panel_data,
+        }
 
 
 @dataclass
@@ -48,12 +91,120 @@ class Phase8XAIAgent:
     - Generates memory warnings for the 3-day sliding window
     - Produces diagnostic insights for monthly parameter autopsy
     - Identifies failure patterns for agentic learning
+    
+    HUMAN-READABLE DASHBOARD (Plan 15-03):
+    - 3-panel output for executive/regulator audience
+    - Plain summary (2-3 sentences max)
+    - Technical details for "Show Details" toggle
     """
     
     # Thresholds for failure classification
     THERMAL_WARNING_PCT = 0.90  # Edge at 90%+ utilization
     DR_INSUFFICIENT_PCT = 0.50  # DR covered less than 50% of potential
     BATTERY_CRITICAL_SOC = 10.0  # SOC below 10 MW is critical
+    
+    def __init__(self):
+        """Initialize with XAI template engine for human-readable output."""
+        self._template_engine = XAITemplateEngine()
+    
+    def build_tick_summary(
+        self,
+        tick: int,
+        trades: List[Dict],
+        predictions: List[Dict],
+        risk_flags: List[Dict],
+        frequency: float,
+        lifeboat_status: Optional[str] = None,
+    ) -> TickSummary:
+        """
+        Build comprehensive XAI summary for a single tick with both technical and plain outputs.
+        
+        Parameters
+        ----------
+        tick : int
+            Current simulation tick number
+        trades : List[Dict]
+            Active trades with seller, buyer, mw keys
+        predictions : List[Dict]
+            Forecasted deficits/surpluses with state, type, mw, time keys
+        risk_flags : List[Dict]
+            Active risk indicators with state, severity, event_type keys
+        frequency : float
+            Current grid frequency in Hz
+        lifeboat_status : Optional[str]
+            "active" if lifeboat protocol engaged, None otherwise
+            
+        Returns
+        -------
+        TickSummary
+            Complete summary with:
+            - raw_summary: Original technical text
+            - plain_summary: 2-3 sentence executive summary
+            - technical_details: Full breakdown (for "Show Details" toggle)
+            - panel_data: Structured data for 3-panel dashboard
+        """
+        # Generate human-readable output via template engine
+        xai_output = self._template_engine.generate(
+            trades=trades,
+            predictions=predictions,
+            risk_flags=risk_flags,
+            frequency=frequency,
+            lifeboat_status=lifeboat_status,
+        )
+        
+        # Compute aggregate values
+        total_traded = sum(t.get("mw", 0) for t in trades)
+        deficit_states = [p.get("state") for p in predictions if p.get("type") == "deficit"]
+        surplus_states = [p.get("state") for p in predictions if p.get("type") == "surplus"]
+        
+        # Build raw summary (backward compatibility)
+        raw_summary = self._build_raw_tick_summary(
+            trades, predictions, risk_flags, frequency, lifeboat_status
+        )
+        
+        return TickSummary(
+            tick=tick,
+            timestamp=datetime.now().isoformat(),
+            frequency_hz=frequency,
+            total_traded_mw=total_traded,
+            deficit_states=deficit_states,
+            surplus_states=surplus_states,
+            lifeboat_active=(lifeboat_status == "active"),
+            raw_summary=raw_summary,
+            plain_summary=xai_output.plain_summary,
+            technical_details=xai_output.technical_details,
+            panel_data={
+                "now": xai_output.panels["now"].__dict__,
+                "predicted": xai_output.panels["predicted"].__dict__,
+                "risk_watch": xai_output.panels["risk_watch"].__dict__,
+            },
+        )
+    
+    def _build_raw_tick_summary(
+        self,
+        trades: List[Dict],
+        predictions: List[Dict],
+        risk_flags: List[Dict],
+        frequency: float,
+        lifeboat_status: Optional[str],
+    ) -> str:
+        """Build original technical summary for backward compatibility."""
+        parts = []
+        
+        parts.append(f"Frequency: {frequency:.2f}Hz")
+        
+        if trades:
+            parts.append(f"Trades: {len(trades)} ({sum(t.get('mw', 0) for t in trades):.0f}MW)")
+        
+        if lifeboat_status == "active":
+            parts.append("⚡ LIFEBOAT ACTIVE")
+        
+        if risk_flags:
+            high_count = sum(1 for r in risk_flags if r.get("severity") in ["HIGH", "CRITICAL"])
+            if high_count:
+                parts.append(f"⚠️ {high_count} high-priority risks")
+        
+        return " | ".join(parts)
 
     def build_summary(
         self,

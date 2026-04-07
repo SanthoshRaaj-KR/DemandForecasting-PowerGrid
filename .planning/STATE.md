@@ -24,8 +24,9 @@
 | 12 - Unit Tests | ⏳ Planned | 0% |
 | 13 - Integration Tests | ⏳ Planned | 0% |
 | 14 - Documentation & Demo | ⏳ Planned | 0% |
+| 15 - White Routing + XAI UI | ⏳ Planned | 0% |
 
-**Overall:** 8/14 phases complete (57%)
+**Overall:** 8/15 phases complete (53%)
 
 ---
 
@@ -52,6 +53,14 @@
 4. **Phase 12:** Expand deterministic unit tests for core agents
 5. **Phase 13:** Add scenario-driven end-to-end integration tests
 6. **Phase 14:** Ship architecture/docs/demo runbook
+7. **Phase 15:** White Routing (risk-aware paths) + A+ Event Fetching + XAI UI Rephrasing
+
+---
+
+## Accumulated Context
+
+### Roadmap Evolution
+- Phase 15 added: White Routing, A+ Event Fetching & XAI UI Rephrasing (2026-04-07)
 
 ---
 

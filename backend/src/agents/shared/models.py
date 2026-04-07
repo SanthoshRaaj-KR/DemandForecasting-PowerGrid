@@ -9,7 +9,7 @@ Defines the core Order dataclass and supporting enums so that
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Any
+from typing import Optional, Any, List
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,54 @@ class RiskLevel(str, Enum):
     MEDIUM   = "MEDIUM"
     HIGH     = "HIGH"
     CRITICAL = "CRITICAL"
+
+
+class RiskSeverity(str, Enum):
+    """
+    Risk severity levels for StimulusFlags and RiskScores.
+    Used by White Routing to weight transit path risk.
+    """
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+# ---------------------------------------------------------------------------
+# White Routing: Risk-Aware Path Selection Models
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StimulusFlag:
+    """
+    Forward-looking risk indicator for a state/transit node.
+    
+    Used by StimulusRadar to aggregate weather forecasts and
+    scraped events into actionable risk signals for Phase 6 routing.
+    """
+    state_id: str              # State identifier (e.g., "WB", "UP")
+    source: str                # "weather", "grid_event", "economic", "political"
+    event_type: str            # "cyclone", "heatwave", "outage", "strike", etc.
+    severity: RiskSeverity     # Risk severity level
+    eta_hours: float           # Hours until event impacts (0 = already happening)
+    estimated_impact_mw: float # Expected demand/supply impact in MW
+    description: str           # Human-readable description
+    expires_at: str            # ISO timestamp when flag should be cleared
+
+
+@dataclass(frozen=True)
+class RiskScore:
+    """
+    Aggregated risk score for a state.
+    
+    Computed by StimulusRadar from multiple StimulusFlags.
+    Used by Phase 6 to sort and prioritize transit paths.
+    """
+    state_id: str                    # State identifier
+    total_score: float               # 0.0 (safe) to 1.0 (critical)
+    severity: RiskSeverity           # Overall severity category
+    active_flags: tuple              # Tuple of StimulusFlags (frozen for immutability)
+    computed_at: str                 # ISO timestamp when score was computed
 
 
 # ---------------------------------------------------------------------------
