@@ -200,13 +200,9 @@ class NodeClassifierLLM:
     def _call_llm(self, prompt: str) -> str:
         """
         Call LLM API and return response text.
-        
-        This is a stub - integrate with your actual LLM provider.
         """
-        if self.llm_provider == "openai":
+        if self.llm_provider in ("openai", "anthropic"):
             return self._call_openai(prompt)
-        elif self.llm_provider == "anthropic":
-            return self._call_anthropic(prompt)
         else:
             # Fallback to mock for testing
             return self._mock_llm_response(prompt)
@@ -233,25 +229,6 @@ class NodeClassifierLLM:
         except Exception as e:
             print(f"[NODE_CLASSIFIER] OpenAI API error: {e}")
             print(f"  Falling back to mock response...")
-            return self._mock_llm_response(prompt)
-    
-    def _call_anthropic(self, prompt: str) -> str:
-        """Call Anthropic Claude API."""
-        try:
-            import anthropic
-            
-            client = anthropic.Anthropic(api_key=self.api_key)
-            response = client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=2000,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            return response.content[0].text
-        except Exception as e:
-            print(f"[NODE_CLASSIFIER] Anthropic API error: {e}")
             return self._mock_llm_response(prompt)
     
     def _mock_llm_response(self, prompt: str) -> str:

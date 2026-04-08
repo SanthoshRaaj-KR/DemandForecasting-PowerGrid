@@ -215,6 +215,8 @@ class NegotiationDialogueAgent:
         approved_mw: float,
         carbon_context: Optional[str] = None,
         dlr_context: Optional[str] = None,
+        buyer_intel: Optional[str] = None,
+        seller_intel: Optional[str] = None,
     ) -> DialogueEntry:
         """
         Generate a 3-turn dialogue justifying the trade.
@@ -254,6 +256,8 @@ class NegotiationDialogueAgent:
                 decision=decision,
                 carbon_context=carbon_context,
                 dlr_context=dlr_context,
+                buyer_intel=buyer_intel,
+                seller_intel=seller_intel,
             )
         else:
             turns = _fallback_dialogue(
@@ -291,6 +295,8 @@ class NegotiationDialogueAgent:
         decision: str,
         carbon_context: Optional[str],
         dlr_context: Optional[str],
+        buyer_intel: Optional[str],
+        seller_intel: Optional[str],
     ) -> List[DialogueTurn]:
         """Call GPT-4o mini to produce a 3-turn JSON dialogue."""
         extra_context = ""
@@ -298,6 +304,10 @@ class NegotiationDialogueAgent:
             extra_context += f"\nCarbon routing context: {carbon_context}"
         if dlr_context:
             extra_context += f"\nDLR (Dynamic Line Rating) context: {dlr_context}"
+        if buyer_intel:
+            extra_context += f"\nBuyer Local Intelligence ({buyer_state}): {buyer_intel}"
+        if seller_intel:
+            extra_context += f"\nSeller Local Intelligence ({seller_state}): {seller_intel}"
 
         prompt = f"""You are the India Grid Digital Twin simulation engine. 
 You must output ONLY a valid JSON array with exactly 3 objects. No markdown, no explanation.
@@ -359,6 +369,7 @@ OUTPUT FORMAT (exact, no deviation):
         trades: List[Tuple[str, str, float, float, float]],  # (buyer, seller, delta, cap, approved)
         carbon_contexts: Optional[Dict[Tuple[str, str], str]] = None,
         dlr_contexts: Optional[Dict[Tuple[str, str], str]] = None,
+        intel_report: Optional[Dict[str, Any]] = None,
     ) -> List[DialogueEntry]:
         """
         Generate dialogues for a batch of trades.
@@ -370,6 +381,17 @@ OUTPUT FORMAT (exact, no deviation):
         for i, (buyer, seller, delta, cap, approved) in enumerate(sorted_trades):
             carbon_ctx = (carbon_contexts or {}).get((buyer, seller))
             dlr_ctx = (dlr_contexts or {}).get((buyer, seller))
+            
+            buyer_intel = None
+            seller_intel = None
+            if intel_report:
+                agent_payload = intel_report.get("agent_payload", {})
+                b_data = agent_payload.get(buyer, {})
+                s_data = agent_payload.get(seller, {})
+                if b_data.get("impact_narrative"):
+                    buyer_intel = b_data["impact_narrative"]
+                if s_data.get("impact_narrative"):
+                    seller_intel = s_data["impact_narrative"]
 
             # Only first 3 trades get full LLM dialogue (cost control)
             if i >= 3 and self._client:
@@ -377,13 +399,13 @@ OUTPUT FORMAT (exact, no deviation):
                 self._client = None
                 entry = self.generate_dialogue(
                     day_index, date_str, buyer, seller, delta, cap, approved,
-                    carbon_ctx, dlr_ctx
+                    carbon_ctx, dlr_ctx, buyer_intel, seller_intel
                 )
                 self._client = orig_client
             else:
                 entry = self.generate_dialogue(
                     day_index, date_str, buyer, seller, delta, cap, approved,
-                    carbon_ctx, dlr_ctx
+                    carbon_ctx, dlr_ctx, buyer_intel, seller_intel
                 )
             entries.append(entry)
         return entries

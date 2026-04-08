@@ -629,6 +629,7 @@ INSTRUCTION: Factor these recent failures into your routing requests today. Do n
                 trades=trade_tuples,
                 carbon_contexts={k: v for k, v in carbon_contexts.items() if v},
                 dlr_contexts={k: v for k, v in dlr_contexts.items() if v},
+                intel_report=intel_report,
             )
             for entry in dialogue_entries:
                 self.dialogue_log.append(entry.to_dict())
@@ -648,8 +649,8 @@ INSTRUCTION: Factor these recent failures into your routing requests today. Do n
             buyer = trade.buyer_state
             if buyer not in step3_resolved:
                 step3_resolved[buyer] = 0.0
-            step3_resolved[buyer] += trade.transfer_mw
-            current_deficit[buyer] = max(0, current_deficit.get(buyer, 0) - trade.transfer_mw)
+            step3_resolved[buyer] += trade.approved_mw
+            current_deficit[buyer] = max(0, current_deficit.get(buyer, 0) - trade.approved_mw)
         
         step3 = WaterfallStepResult(
             step_name="Spatial (Transmission BFS)",

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, List
+from dataclasses import dataclass
+
+
+@dataclass
+class GridEvent:
+    event_name: str
+    affected_states: List[str]
+    demand_multiplier: float
+    supply_multiplier: float
 
 
 CITY_REGISTRY: Dict[str, Dict[str, Any]] = {

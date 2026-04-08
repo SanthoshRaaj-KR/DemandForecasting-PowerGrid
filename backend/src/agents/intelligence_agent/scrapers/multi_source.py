@@ -112,6 +112,18 @@ GNEWS_RSS_QUERIES: Dict[str, str] = {
     "LNG regas India":         "India+LNG+terminal+regasification+power+gas",
 }
 
+# ── Tier 5: Localized Scheduled Events (trust 0.85)
+GNEWS_LOCAL_EVENTS: Dict[str, str] = {
+    "KAR IPL Cricket":          "IPL+match+Bengaluru+Chinnaswamy+Karnataka",
+    "KAR IT Strike/Bandh":      "Bengaluru+bandh+strike+Karnataka+IT+park",
+    "UP Election Rally":        "Uttar+Pradesh+election+rally+yogi+akhilesh",
+    "UP Religious Festival":    "Uttar+Pradesh+Kumbh+Diwali+festival+crowd",
+    "WB Cyclone/Monsoon":       "West+Bengal+Kolkata+cyclone+storm+alert",
+    "WB Political Strike":      "Kolkata+bandh+strike+protest",
+    "BHR Heatwave":             "Bihar+Patna+heatwave+red+alert",
+    "BHR Coal/Rail Strike":     "Bihar+rail+roko+coal+transport+strike",
+}
+
 
 def _gnews_rss_url(query: str) -> str:
     return f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -209,6 +221,8 @@ class MultiSourceScraper:
             tasks.append((name, url, "rss_geo"))
         for name, query in GNEWS_RSS_QUERIES.items():
             tasks.append((name, _gnews_rss_url(query), "gnews_rss"))
+        for name, query in GNEWS_LOCAL_EVENTS.items():
+            tasks.append((name, _gnews_rss_url(query), "gnews_local"))
 
         print(f"\n[MultiSourceScraper] Scraping {len(tasks)} feeds in parallel...")
 
@@ -271,6 +285,8 @@ class MultiSourceScraper:
 
         for name, query in queries.items():
             tasks.append((name, _gnews_rss_url(query), "gnews_rss"))
+        for name, query in GNEWS_LOCAL_EVENTS.items():
+            tasks.append((name, _gnews_rss_url(query), "gnews_local"))
 
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as pool:
             futures = {

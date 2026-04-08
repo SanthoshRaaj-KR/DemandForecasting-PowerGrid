@@ -21,6 +21,7 @@ from engine import APrioriBrain
 from intelligence import StochasticTrigger
 from src.agents.routing_agent.unified_routing_orchestrator import UnifiedRoutingOrchestrator
 from src.agents.routing_agent.parameter_autopsy_agent import ParameterAutopsyAgent
+from src.agents.xai.phase8_xai_agent import Phase8XAIAgent
 
 
 class UnifiedOrchestrator:
@@ -35,6 +36,7 @@ class UnifiedOrchestrator:
         self.trigger = StochasticTrigger(self.backend_dir)
         self.waterfall = UnifiedRoutingOrchestrator()
         self.autopsy = ParameterAutopsyAgent()
+        self.xai_agent = Phase8XAIAgent()
 
     def _load_grid_config(self) -> Dict[str, Any]:
         cfg_path = self.backend_dir / "config" / "grid_config.json"
@@ -73,15 +75,19 @@ class UnifiedOrchestrator:
         start = datetime.fromisoformat(start_date)
         day_reports: List[Dict[str, Any]] = []
 
+        # Gather intelligence ONCE for the simulation horizon using today's data
+        print(f"\n[ORCHESTRATOR] Gathering 7-day intelligence lookahead starting {start_date}...")
+        base_intel = self.trigger.generate_daily_report(
+            day_index=0,
+            date_str=start_date,
+            state_ids=state_ids,
+        )
+
         for day_index in range(days):
             date_str = (start + timedelta(days=day_index)).strftime("%Y-%m-%d")
             baseline_day = master_schedule["schedule"][day_index]
 
-            intel = self.trigger.generate_daily_report(
-                day_index=day_index,
-                date_str=date_str,
-                state_ids=state_ids,
-            )
+            intel = base_intel
 
             delta_by_state: Dict[str, float] = {}
             actual_by_state: Dict[str, float] = {}
@@ -132,6 +138,28 @@ class UnifiedOrchestrator:
                     # Feature 5: battery lock log
                     "battery_lock_log": self.waterfall._event_flag_battery_agent.get_log(),
                 }
+
+                # --- XAI DASHBOARD (Phase 8) ---
+                step2_mw = sum(wf.steps_executed[1].resolved_mw.values()) if len(wf.steps_executed) > 1 else 0.0
+                step3_mw = sum(wf.steps_executed[2].resolved_mw.values()) if len(wf.steps_executed) > 2 else 0.0
+                
+                xai_summary = self.xai_agent.build_summary(
+                    initial_deficit_by_state_mw=deficits,
+                    dr_activated_total_mw=step2_mw,
+                    dr_savings_total_inr=step2_mw * 6.0,  # Based on dr_clearing_price=6.0
+                    executed_import_total_mw=step3_mw,
+                    load_shedding_total_mw=sum(wf.load_shedding_mw.values()),
+                    battery_soc_after=battery_soc,
+                )
+                print(f"\n[{date_str}] XAI DASHBOARD:")
+                print(f"-> WHAT IT DID: {xai_summary.summary_line}")
+                if xai_summary.memory_warning:
+                    print(f"-> WHY IT DID IT (Learning): {xai_summary.memory_warning}")
+                else:
+                    print(f"-> WHY IT DID IT: Operated normally within limits.")
+                print("-" * 70)
+                
+                waterfall_output["xai_summary"] = xai_summary.summary_line
 
             day_reports.append(
                 {
@@ -185,3 +213,10 @@ class UnifiedOrchestrator:
             result["autopsy_result"] = {"status": "NO_WARNINGS", "message": "Clean run — no config changes needed."}
 
         return result
+
+if __name__ == "__main__":
+    print("Initializing Smart Grid Simulator with XAI...")
+    sim = UnifiedOrchestrator()
+    print("Running simulation for 1 week (7 days)...")
+    result = sim.run(days=7)
+    print(f"\nSimulation complete. Outputs saved to: {result.get('saved_path')}")
